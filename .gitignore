@@ -1,10 +1,23 @@
 __pycache__/
 *.pyc
+*.pyo
 .env
 checkpoints/*.pth
+backend/checkpoints/*.pth
 *.pth
 uploads/
 reports/
 .streamlit/
 venv/
+.venv/
+env/
 node_modules/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+*.log
+.DS_Store
+Thumbs.db
+AI Images Detector/

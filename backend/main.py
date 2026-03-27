@@ -1,6 +1,6 @@
 """
 DeepSight AI — FastAPI Backend Server
-Dual-engine AI-generated image & deepfake detector
+Dual-engine AI-generated image & deepfake detector with full forensic analysis.
 """
 import os
 import sys
@@ -9,10 +9,11 @@ import time
 import asyncio
 from datetime import datetime
 from typing import Optional
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 import io
 
@@ -23,21 +24,11 @@ from backend.services.classifier import load_model, classify_image
 from backend.services.gradcam_service import generate_heatmap
 from backend.services.gemini_forensics import configure_gemini, analyze_image_forensically
 from backend.services.score_combiner import combine_verdicts
-
-# ─── App Setup ───────────────────────────────────────────────
-app = FastAPI(
-    title="DeepSight AI",
-    description="Dual-engine AI-generated image & deepfake detector",
-    version="1.0.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+from backend.services.metadata_analyzer import analyze_metadata
+from backend.services.frequency_analyzer import analyze_frequency
+from backend.services.ela_analyzer import analyze_ela
+from backend.services.report_generator import generate_report
+from backend.services.checkpoint_downloader import download_checkpoint, is_checkpoint_available
 
 # ─── Analytics Store ─────────────────────────────────────────
 analytics = {
@@ -48,56 +39,87 @@ analytics = {
     "recent_scans": [],
 }
 
-# ─── Startup ─────────────────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    """Load model and configure Gemini on startup."""
+
+# ─── Lifespan (replaces deprecated @app.on_event) ───────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup and shutdown lifecycle management."""
+    # ── Startup ──
+    # Auto-download checkpoint if not present
+    if not is_checkpoint_available():
+        download_checkpoint()
+
     checkpoint = os.path.join("backend", "checkpoints", "checkpoint_phase2.pth")
     if not os.path.exists(checkpoint):
-        # Also check parent directory structure
         alt_checkpoint = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "AI-Generated-Deepfake-Image-Detector",
-            "AI Images Detector",
-            "checkpoints",
-            "checkpoint_phase2.pth"
+            "..", "AI-Generated-Deepfake-Image-Detector",
+            "AI Images Detector", "checkpoints", "checkpoint_phase2.pth"
         )
         if os.path.exists(alt_checkpoint):
             checkpoint = alt_checkpoint
 
     load_model(checkpoint)
     configure_gemini()
+    print("🛡️ DeepSight AI server ready!")
+
+    yield  # App is running
+
+    # ── Shutdown ──
+    print("🛡️ DeepSight AI server shutting down...")
+
+
+# ─── App Setup ───────────────────────────────────────────────
+app = FastAPI(
+    title="DeepSight AI",
+    description="Dual-engine AI-generated image & deepfake detector with full forensic analysis",
+    version="2.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ─── Endpoints ───────────────────────────────────────────────
 @app.get("/")
 async def root():
-    return {"message": "🛡️ DeepSight AI — Dual-Engine Deepfake Detector", "status": "running"}
+    return {
+        "message": "🛡️ DeepSight AI — Dual-Engine Deepfake Detector",
+        "version": "2.0.0",
+        "status": "running",
+        "engines": ["ConvNeXtV2 (ML)", "Gemini 3.1 Flash (LLM)", "Metadata", "FFT", "ELA"],
+    }
 
 
 @app.post("/api/analyze")
-async def analyze_image(
+async def analyze_image_endpoint(
     file: UploadFile = File(...),
     threshold: float = Form(default=0.50),
     use_gemini: bool = Form(default=True),
+    include_metadata: bool = Form(default=True),
+    include_frequency: bool = Form(default=True),
+    include_ela: bool = Form(default=True),
 ):
     """
-    Analyze a single image for AI-generation / deepfake artifacts.
+    Full forensic analysis of a single image.
 
-    Returns ML classification, Grad-CAM heatmap, Gemini forensics, and combined verdict.
+    Returns ML classification, Grad-CAM, Gemini forensics, metadata,
+    frequency analysis, ELA, and combined verdict.
     """
     start_time = time.time()
     analysis_id = str(uuid.uuid4())[:8]
 
     try:
-        # Read and validate image
         contents = await file.read()
         image = Image.open(io.BytesIO(contents)).convert("RGB")
-
-        # Validate size
         if image.width * image.height > 4096 * 4096:
             raise HTTPException(400, "Image too large. Max 4096x4096 pixels.")
-
     except HTTPException:
         raise
     except Exception as e:
@@ -108,12 +130,10 @@ async def analyze_image(
 
     # ─── Grad-CAM Heatmap ────────────────────────────────
     try:
-        target_class = 1  # Analyze for "Fake" class
-        heatmap_b64, raw_cam_b64 = generate_heatmap(image, target_class)
+        heatmap_b64, raw_cam_b64 = generate_heatmap(image, target_class=1)
     except Exception as e:
         print(f"⚠️ Grad-CAM error: {e}")
-        heatmap_b64 = None
-        raw_cam_b64 = None
+        heatmap_b64, raw_cam_b64 = None, None
 
     # ─── Engine 2: Gemini Forensics ──────────────────────
     gemini_result = None
@@ -123,9 +143,32 @@ async def analyze_image(
         except Exception as e:
             print(f"⚠️ Gemini error: {e}")
 
-    # ─── Combine Verdicts ────────────────────────────────
-    combined = combine_verdicts(ml_result, gemini_result)
+    # ─── Metadata Analysis ───────────────────────────────
+    metadata_result = None
+    if include_metadata:
+        try:
+            metadata_result = analyze_metadata(image, contents)
+        except Exception as e:
+            print(f"⚠️ Metadata error: {e}")
 
+    # ─── Frequency Analysis ──────────────────────────────
+    frequency_result = None
+    if include_frequency:
+        try:
+            frequency_result = analyze_frequency(image)
+        except Exception as e:
+            print(f"⚠️ Frequency error: {e}")
+
+    # ─── ELA ─────────────────────────────────────────────
+    ela_result = None
+    if include_ela:
+        try:
+            ela_result = analyze_ela(image)
+        except Exception as e:
+            print(f"⚠️ ELA error: {e}")
+
+    # ─── Combine Verdicts ────────────────────────────────
+    combined = combine_verdicts(ml_result, gemini_result, metadata_result, frequency_result, ela_result)
     processing_time = round(time.time() - start_time, 2)
 
     # ─── Update Analytics ────────────────────────────────
@@ -142,11 +185,9 @@ async def analyze_image(
         "confidence": combined["final_confidence"],
         "timestamp": datetime.now().isoformat(),
     })
-    # Keep only last 50
     analytics["recent_scans"] = analytics["recent_scans"][-50:]
 
     # ─── Build Response ──────────────────────────────────
-    # Remove non-serializable logits from ml_result
     ml_result_clean = {k: v for k, v in ml_result.items() if k != "logits"}
 
     response = {
@@ -155,6 +196,9 @@ async def analyze_image(
         "timestamp": datetime.now().isoformat(),
         "ml_result": ml_result_clean,
         "gemini_result": gemini_result,
+        "metadata_result": metadata_result,
+        "frequency_result": {k: v for k, v in (frequency_result or {}).items() if k != "spectrum_base64"} if frequency_result else None,
+        "ela_result": {k: v for k, v in (ela_result or {}).items() if not k.endswith("_base64")} if ela_result else None,
         "combined_verdict": combined,
         "heatmap_base64": heatmap_b64,
         "raw_cam_base64": raw_cam_b64,
@@ -172,7 +216,7 @@ async def batch_analyze(
     """Analyze multiple images in batch (ML only for speed)."""
     results = []
 
-    for file in files[:20]:  # Limit to 20 images
+    for file in files[:20]:
         try:
             contents = await file.read()
             image = Image.open(io.BytesIO(contents)).convert("RGB")
@@ -206,6 +250,59 @@ async def batch_analyze(
     }
 
 
+@app.post("/api/report/pdf")
+async def generate_pdf_report(
+    file: UploadFile = File(...),
+    threshold: float = Form(default=0.50),
+):
+    """Generate a full PDF forensic report."""
+    try:
+        contents = await file.read()
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+    except Exception as e:
+        raise HTTPException(400, f"Invalid image: {e}")
+
+    start_time = time.time()
+
+    ml_result = classify_image(image, threshold)
+
+    try:
+        heatmap_b64, _ = generate_heatmap(image, target_class=1)
+    except Exception:
+        heatmap_b64 = None
+
+    try:
+        gemini_result = await analyze_image_forensically(image)
+    except Exception:
+        gemini_result = None
+
+    metadata_result = analyze_metadata(image, contents)
+    frequency_result = analyze_frequency(image)
+    ela_result = analyze_ela(image)
+
+    combined = combine_verdicts(ml_result, gemini_result, metadata_result, frequency_result, ela_result)
+    processing_time = round(time.time() - start_time, 2)
+
+    pdf_bytes = generate_report(
+        image=image,
+        combined_result=combined,
+        ml_result=ml_result,
+        gemini_result=gemini_result,
+        heatmap_b64=heatmap_b64,
+        metadata_result=metadata_result,
+        frequency_result=frequency_result,
+        ela_result=ela_result,
+        filename=file.filename,
+        processing_time=processing_time,
+    )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=DeepSight_Report_{file.filename}.pdf"}
+    )
+
+
 @app.get("/api/stats")
 async def get_stats():
     """Get analysis statistics."""
@@ -227,7 +324,12 @@ async def get_stats():
 @app.get("/api/health")
 async def health():
     """Health check endpoint."""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy",
+        "version": "2.0.0",
+        "timestamp": datetime.now().isoformat(),
+        "checkpoint_available": is_checkpoint_available(),
+    }
 
 
 # ─── Run ─────────────────────────────────────────────────────

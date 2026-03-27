@@ -1,38 +1,60 @@
-"""Score combiner — merges ML classification and Gemini forensic results into a final verdict."""
+"""Score Combiner — Merges all analysis signals into a final verdict.
+
+Combines:
+- Engine 1: ConvNeXtV2 ML classification (60% weight)
+- Engine 2: Gemini forensic analysis (40% weight)
+- Signal 3: Metadata risk (bonus modifier)
+- Signal 4: Frequency analysis (bonus modifier)
+- Signal 5: ELA analysis (bonus modifier)
+"""
 
 
-def combine_verdicts(ml_result: dict, gemini_result: dict = None) -> dict:
+def combine_verdicts(
+    ml_result: dict,
+    gemini_result: dict = None,
+    metadata_result: dict = None,
+    frequency_result: dict = None,
+    ela_result: dict = None,
+) -> dict:
     """
-    Combine ML classification and Gemini forensic analysis into a final verdict.
+    Combine all analysis results into a final verdict.
 
     Uses weighted averaging with agreement bonuses:
     - ML model gets 60% weight (trained on 400K images, reliable)
     - Gemini gets 40% weight (contextual forensic analysis)
-    - If both agree: +10% confidence bonus
-    - If they disagree: flag for review, use the more confident one
+    - Metadata/Frequency/ELA provide bonus confidence modifiers
+    - If both engines agree: +10% confidence bonus
+    - If they disagree: use artifact scores to break tie
 
     Args:
         ml_result: dict from classifier.classify_image()
         gemini_result: dict from gemini_forensics.analyze_image_forensically()
+        metadata_result: dict from metadata_analyzer.analyze_metadata()
+        frequency_result: dict from frequency_analyzer.analyze_frequency()
+        ela_result: dict from ela_analyzer.analyze_ela()
 
     Returns:
-        dict with final_label, final_confidence, agreement, risk_level
+        dict with final_label, final_confidence, agreement, risk_level, details
     """
     ml_fake_prob = ml_result["fake_probability"]
     ml_label = ml_result["label"]
 
-    # If Gemini is not available, use ML result only
+    # ─── ML-Only Mode ────────────────────────────────────
     if gemini_result is None or gemini_result.get("confidence", 0) == 0:
-        return {
+        base_result = {
             "final_label": ml_label,
             "final_confidence": round(ml_result["confidence"], 4),
             "ml_weight": 1.0,
             "gemini_weight": 0.0,
             "agreement": True,
             "risk_level": _get_risk_level(ml_fake_prob),
+            "analysis_engines": ["ConvNeXtV2"],
         }
+        # Apply auxiliary signal bonuses even in ML-only mode
+        base_result = _apply_auxiliary_bonuses(base_result, metadata_result, frequency_result, ela_result)
+        return base_result
 
-    # Parse Gemini verdict
+    # ─── Parse Gemini Verdict ────────────────────────────
     gemini_verdict = gemini_result.get("overall_verdict", "Unknown")
     gemini_confidence = gemini_result.get("confidence", 0.5)
 
@@ -44,41 +66,98 @@ def combine_verdicts(ml_result: dict, gemini_result: dict = None) -> dict:
     else:
         gemini_fake_prob = 0.5  # Unknown — neutral
 
-    # Weighted combination
+    # ─── Weighted Combination ────────────────────────────
     ml_weight = 0.60
     gemini_weight = 0.40
 
     combined_fake_prob = (ml_fake_prob * ml_weight) + (gemini_fake_prob * gemini_weight)
 
-    # Check agreement
+    # ─── Agreement Analysis ──────────────────────────────
     ml_says_fake = ml_label == "Fake"
     gemini_says_fake = gemini_verdict.lower() == "fake"
     agreement = ml_says_fake == gemini_says_fake
 
-    # Agreement bonus/penalty
     if agreement:
         # Both agree — boost confidence
-        combined_fake_prob = min(1.0, combined_fake_prob * 1.1)
+        combined_fake_prob = min(1.0, combined_fake_prob * 1.10)
     else:
         # Disagree — use artifact scores to break tie
         artifact_avg = _get_artifact_average(gemini_result.get("artifacts", []))
-        if artifact_avg > 50:  # High artifact scores = likely fake
-            combined_fake_prob = max(combined_fake_prob, 0.6)
+        if artifact_avg > 50:
+            combined_fake_prob = max(combined_fake_prob, 0.60)
+        elif artifact_avg < 20:
+            combined_fake_prob = min(combined_fake_prob, 0.45)
         else:
-            combined_fake_prob = min(combined_fake_prob, 0.5)
+            combined_fake_prob = min(combined_fake_prob, 0.50)
 
-    # Final verdict
+    # ─── Final Verdict ───────────────────────────────────
     final_label = "Fake" if combined_fake_prob > 0.5 else "Real"
     final_confidence = combined_fake_prob if final_label == "Fake" else (1 - combined_fake_prob)
 
-    return {
+    result = {
         "final_label": final_label,
         "final_confidence": round(final_confidence, 4),
+        "combined_fake_probability": round(combined_fake_prob, 4),
         "ml_weight": ml_weight,
         "gemini_weight": gemini_weight,
         "agreement": agreement,
         "risk_level": _get_risk_level(combined_fake_prob),
+        "analysis_engines": ["ConvNeXtV2", "Gemini"],
+        "probable_generator": gemini_result.get("probable_generator", "Unknown"),
     }
+
+    # Apply auxiliary signal bonuses
+    result = _apply_auxiliary_bonuses(result, metadata_result, frequency_result, ela_result)
+
+    return result
+
+
+def _apply_auxiliary_bonuses(
+    result: dict,
+    metadata_result: dict = None,
+    frequency_result: dict = None,
+    ela_result: dict = None,
+) -> dict:
+    """Apply bonus confidence modifiers from auxiliary analysis signals."""
+    auxiliary_scores = []
+    auxiliary_details = {}
+
+    if metadata_result:
+        meta_risk = metadata_result.get("risk_score", 0)
+        auxiliary_scores.append(meta_risk)
+        auxiliary_details["metadata_risk"] = meta_risk
+        if "Metadata" not in result.get("analysis_engines", []):
+            result.setdefault("analysis_engines", []).append("Metadata")
+
+    if frequency_result:
+        freq_risk = frequency_result.get("risk_score", 0)
+        auxiliary_scores.append(freq_risk)
+        auxiliary_details["frequency_risk"] = freq_risk
+        if "FFT" not in result.get("analysis_engines", []):
+            result.setdefault("analysis_engines", []).append("FFT")
+
+    if ela_result:
+        ela_risk = ela_result.get("risk_score", 0)
+        auxiliary_scores.append(ela_risk)
+        auxiliary_details["ela_risk"] = ela_risk
+        if "ELA" not in result.get("analysis_engines", []):
+            result.setdefault("analysis_engines", []).append("ELA")
+
+    if auxiliary_scores:
+        avg_aux = sum(auxiliary_scores) / len(auxiliary_scores)
+        auxiliary_details["average_auxiliary_risk"] = round(avg_aux, 2)
+
+        # Moderate confidence adjustment based on auxiliary signals
+        current_confidence = result["final_confidence"]
+        if avg_aux > 60 and result["final_label"] == "Fake":
+            boost = min(0.05, (avg_aux - 60) / 800)
+            result["final_confidence"] = round(min(0.99, current_confidence + boost), 4)
+        elif avg_aux < 20 and result["final_label"] == "Real":
+            boost = min(0.05, (20 - avg_aux) / 800)
+            result["final_confidence"] = round(min(0.99, current_confidence + boost), 4)
+
+    result["auxiliary_analysis"] = auxiliary_details
+    return result
 
 
 def _get_risk_level(fake_probability: float) -> str:
