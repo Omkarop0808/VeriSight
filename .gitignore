@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.env
+checkpoints/*.pth
+*.pth
+uploads/
+reports/
+.streamlit/
+venv/
+node_modules/
