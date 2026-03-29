@@ -38,3 +38,10 @@ sample_images/
 results_history.json
 history/
 temp/
+# Neural Nexus Submission Assets (Private Documentation)
+ARCHITECTURE_DIAGRAM_PROMPT.md
+WORKFLOW_DIAGRAM_PROMPT.md
+SUBMISSION_CONTENT.md
+TERMS_EXPLAINED.md
+METRICS_EXPLAINED.md
+
