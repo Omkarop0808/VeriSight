@@ -18,30 +18,43 @@ from PIL import Image
 from fpdf import FPDF
 
 
+import re
+
 def clean_text(text):
-    """Ensure text is a string and handle basic cleaning without stripping Unicode/Emoji."""
+    """Ensure text is a string and handle basic cleaning by stripping/replacing Unicode/Emoji."""
     if not isinstance(text, str):
         return str(text)
     
-    # We still keep common replacements for semantic clarity in some contexts,
-    # but the font will handle the rendering.
+    # Replace common meaningful emojis with text equivalents
     replacements = {
-        "🟡": "🟡", "🔴": "🔴", "🔵": "🔵", "🟢": "🟢",
-        "✓": "✓", "✗": "✗", "🎯": "🎯", "🧠": "🧠",
-        "🔬": "🔬", "🔮": "🔮", "📊": "📊", "📋": "📋",
-        "🛡️": "🛡️"
+        "🔴": "[CRITICAL]", "🟡": "[WARNING]", "🔵": "[INFO]", "🟢": "[OK]",
+        "✓": "[YES]", "✗": "[NO]", "🎯": "[TARGET]", "🧠": "[ML]",
+        "🔬": "[SCIENCE]", "🔮": "[AI]", "📊": "[STATS]", "📋": "[META]",
+        "🛡️": "[SEC]", "⚖️": "[VERDICT]"
     }
     for k, v in replacements.items():
         text = text.replace(k, v)
     
-    return text  # No longer encode to ASCII!
+    # Strip remaining emojis and unsupported unicode (allowing Latin-1, Basic Latin, punctuation)
+    text = re.sub(r'[^\x00-\x7F\xA0-\xFF\u0100-\u017F\u2018-\u201D\u2013\u2014]', '', text)
+    
+    words = re.split(r'(\s+)', text)
+    safe_words = []
+    for w in words:
+        if not re.match(r'\s', w) and len(w) > 45:
+            chunked = " ".join([w[i:i+45] for i in range(0, len(w), 45)])
+            safe_words.append(chunked)
+        else:
+            safe_words.append(w)
+            
+    return "".join(safe_words)
 
 
 class ForensicReport(FPDF):
     """Custom PDF class with header/footer."""
     
     def cell(self, *args, **kwargs):
-        """Override cell to ensure all text is cleaned."""
+        """Override cell to ensure all text is cleaned and handle space errors."""
         if 'txt' in kwargs:
             kwargs['txt'] = clean_text(kwargs['txt'])
         elif 'text' in kwargs:
@@ -50,10 +63,18 @@ class ForensicReport(FPDF):
             args = list(args)
             args[2] = clean_text(args[2])
             args = tuple(args)
-        super().cell(*args, **kwargs)
+        
+        try:
+            super().cell(*args, **kwargs)
+        except Exception as e:
+            if "Not enough horizontal space" in str(e):
+                self.set_x(10)
+                super().cell(*args, **kwargs)
+            else:
+                raise e
 
     def multi_cell(self, *args, **kwargs):
-        """Override multi_cell to ensure all text is cleaned."""
+        """Override multi_cell to ensure all text is cleaned and handle space errors."""
         if 'txt' in kwargs:
             kwargs['txt'] = clean_text(kwargs['txt'])
         elif 'text' in kwargs:
@@ -62,17 +83,32 @@ class ForensicReport(FPDF):
             args = list(args)
             args[2] = clean_text(args[2])
             args = tuple(args)
-        super().multi_cell(*args, **kwargs)
+            
+        try:
+            super().multi_cell(*args, **kwargs)
+        except Exception as e:
+            if "Not enough horizontal space" in str(e):
+                self.set_x(10)
+                # If width was 0 or negative, force epw
+                if len(args) > 0 and args[0] <= 0:
+                    args = list(args)
+                    args[0] = self.epw
+                    args = tuple(args)
+                super().multi_cell(*args, **kwargs)
+            else:
+                raise e
 
     def header(self):
         self.set_fill_color(10, 10, 26)
         self.rect(0, 0, 210, 297, 'F')
         self.set_font("Helvetica", "B", 20)
         self.set_text_color(0, 212, 255)
-        self.cell(0, 15, "VeriSight AI", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.set_x(10)
+        self.multi_cell(0, 15, "VeriSight AI", align="C")
         self.set_font("Helvetica", "", 10)
         self.set_text_color(136, 146, 176)
-        self.cell(0, 6, "AI-Generated Image Forensic Analysis Report", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.set_x(10)
+        self.multi_cell(0, 6, "AI-Generated Image Forensic Analysis Report", align="C")
         self.ln(5)
         # Divider line
         self.set_draw_color(0, 212, 255)
@@ -84,7 +120,8 @@ class ForensicReport(FPDF):
         self.set_y(-20)
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(74, 85, 104)
-        self.cell(0, 10, f"VeriSight AI Report | Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}/{{nb}}", align="C")
+        self.set_x(10)
+        self.multi_cell(0, 10, f"VeriSight AI Report | Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}/{{nb}}", align="C")
 
 
 def generate_report(
@@ -92,7 +129,11 @@ def generate_report(
     combined_result: dict,
     ml_result: dict,
     gemini_result: dict = None,
+    vit_result: dict = None,
+    anatomy_result: dict = None,
+    regional_result: dict = None,
     heatmap_b64: str = None,
+    vit_heatmap_b64: str = None,
     metadata_result: dict = None,
     frequency_result: dict = None,
     ela_result: dict = None,
@@ -126,8 +167,11 @@ def generate_report(
     # ─── Report Info ─────────────────────────────────────
     pdf.set_font(default_font, "", 9)
     pdf.set_text_color(136, 146, 176)
-    pdf.cell(0, 5, f"File: {filename}  |  Date: {datetime.datetime.now().strftime('%B %d, %Y at %H:%M')}  |  Processing: {processing_time}s", new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(5)
+    
+    # Restrict filename length to physically avoid cell horizontal overflow
+    safe_fn = filename if len(filename) < 40 else filename[:37] + "..."
+    pdf.multi_cell(0, 5, f"File: {safe_fn}  |  Date: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}  |  Runtime: {processing_time}s")
+    pdf.ln(2)
 
     # ─── Verdict Section ─────────────────────────────────
     verdict = combined_result.get("final_label", "Unknown")
@@ -135,19 +179,47 @@ def generate_report(
     risk = combined_result.get("risk_level", "Unknown")
 
     # Verdict box
-    if verdict == "Fake":
+    if "AI Generated" in verdict or "Fake" in verdict:
         pdf.set_fill_color(40, 10, 10)
         pdf.set_text_color(255, 59, 48)
+    elif "Suspicious" in verdict or "Partially" in verdict:
+        pdf.set_fill_color(40, 25, 10)
+        pdf.set_text_color(255, 149, 0)
+    elif "Inconclusive" in verdict:
+        pdf.set_fill_color(30, 30, 10)
+        pdf.set_text_color(255, 204, 0)
     else:
         pdf.set_fill_color(10, 40, 20)
         pdf.set_text_color(0, 255, 136)
 
-    pdf.set_font(default_font, "B", 28)
-    pdf.cell(0, 20, f"VERDICT: {verdict.upper()}", align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
+    # Dynamically shrink font for very long verdicts to prevent crashing
+    verdict_text = f"VERDICT: {verdict.upper()}"
+    if len(verdict_text) > 30:
+        pdf.set_font(default_font, "B", 18)
+    elif len(verdict_text) > 20:
+        pdf.set_font(default_font, "B", 22)
+    else:
+        pdf.set_font(default_font, "B", 28)
+        
+    pdf.multi_cell(0, 20, verdict_text, align="C", fill=True)
 
     pdf.set_font(default_font, "", 14)
     pdf.set_text_color(160, 174, 192)
-    pdf.cell(0, 10, f"Confidence: {confidence*100:.1f}%  |  Risk Level: {risk}", align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.multi_cell(0, 10, f"Confidence: {confidence*100:.1f}%  |  Risk Level: {risk}", align="C")
+    
+    # Final Expert Statement (If available)
+    expert_statement = combined_result.get("expert_statement")
+    if expert_statement:
+        pdf.ln(5)
+        pdf.set_fill_color(30, 20, 50)
+        pdf.set_font(default_font, "B", 11)
+        pdf.set_text_color(167, 139, 250)
+        pdf.multi_cell(0, 10, "  ⚖️  INVESTIGATIVE CLOSING STATEMENT", fill=True, border=1, align="C")
+        pdf.set_fill_color(25, 25, 25)
+        pdf.set_font(default_font, "I", 10)
+        pdf.set_text_color(226, 232, 240)
+        pdf.multi_cell(0, 8, f"\"{expert_statement}\"", fill=True, border=1, align="L")
+        
     pdf.ln(8)
 
     # ─── Input Image ─────────────────────────────────────
@@ -160,7 +232,8 @@ def generate_report(
         pdf.ln(5)
     except Exception:
         pdf.set_text_color(136, 146, 176)
-        pdf.cell(0, 10, "[Image could not be embedded]", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 10, "[Image could not be embedded]")
 
     # ─── Engine 1: ML Classification ─────────────────────
     _add_section_header(pdf, "Engine 1: ConvNeXtV2 Classification")
@@ -175,18 +248,26 @@ def generate_report(
 
     # ─── Grad-CAM Heatmap ────────────────────────────────
     if heatmap_b64:
-        _add_section_header(pdf, "Grad-CAM Heatmap (Model Attention)")
+        _add_section_header(pdf, "Grad-CAM Heatmap (ConvNeXtV2)")
         try:
             heatmap_bytes = base64.b64decode(heatmap_b64)
-            heatmap_buffer = io.BytesIO(heatmap_bytes)
-            pdf.image(heatmap_buffer, x=55, w=100)
+            pdf.image(io.BytesIO(heatmap_bytes), x=55, w=100)
+            pdf.ln(3)
+        except Exception: pass
+
+    # ─── ViT Regional Heatmap ────────────────────────────
+    if vit_heatmap_b64:
+        _add_section_header(pdf, "Regional AI Detection Map (ViT)")
+        try:
+            vit_bytes = base64.b64decode(vit_heatmap_b64)
+            pdf.image(io.BytesIO(vit_bytes), x=55, w=100)
             pdf.ln(3)
             pdf.set_font(default_font, "I", 8)
             pdf.set_text_color(113, 128, 150)
-            pdf.cell(0, 5, "Brighter regions indicate areas the model found most suspicious", align="C", new_x="LMARGIN", new_y="NEXT")
-        except Exception:
-            pass
-        pdf.ln(5)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(0, 5, "Vision Transformer patch-grid analysis highlighting AI-generated regions.", align="C")
+        except Exception: pass
+    pdf.ln(5)
 
     # ─── Engine 2: Gemini Forensics ──────────────────────
     if gemini_result and gemini_result.get("confidence", 0) > 0:
@@ -224,7 +305,9 @@ def generate_report(
                     pdf.set_text_color(0, 255, 136)
 
                 pdf.set_font(default_font, "B", 10)
-                pdf.cell(0, 6, f"{category}: {score}/100 [{severity.upper()}]", new_x="LMARGIN", new_y="NEXT")
+                safe_cat = category if len(category) < 50 else category[:47] + "..."
+                safe_sev = severity[:10]
+                pdf.multi_cell(0, 6, f"{safe_cat}: {score}/100 [{safe_sev.upper()}]")
                 pdf.set_text_color(160, 174, 192)
                 pdf.set_font(default_font, "", 9)
                 pdf.multi_cell(0, 5, desc)
@@ -238,6 +321,38 @@ def generate_report(
             pdf.set_font(default_font, "", 9)
             pdf.set_text_color(160, 174, 192)
             pdf.multi_cell(0, 5, detailed)
+
+    # ─── Advanced Anatomical Check ───────────────────────
+    if anatomy_result and anatomy_result.get("overlay_b64"):
+        pdf.add_page()
+        _add_section_header(pdf, "Anatomical Consistency Check (MediaPipe)")
+        try:
+            ana_bytes = base64.b64decode(anatomy_result["overlay_b64"])
+            pdf.image(io.BytesIO(ana_bytes), x=55, w=100)
+            pdf.ln(3)
+            f = anatomy_result.get("flags", {})
+            pdf.set_font(default_font, "B", 9)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(0, 5, f"Hands: {f.get('hand_count', 0)} | Fingers: {f.get('total_fingers', 0)} | Limbs: {f.get('arms_count', 0)+f.get('legs_count', 0)}", align="C")
+            pdf.set_font(default_font, "I", 9)
+            pdf.multi_cell(0, 5, clean_text(anatomy_result.get("explanation", "")))
+        except Exception: pass
+        pdf.ln(5)
+
+    # ─── Regional Inconsistency ──────────────────────────
+    if regional_result and regional_result.get("composite_b64"):
+        _add_section_header(pdf, "Regional Inconsistency (Composite Detection)")
+        try:
+            reg_bytes = base64.b64decode(regional_result["composite_b64"])
+            pdf.image(io.BytesIO(reg_bytes), x=55, w=100)
+            pdf.ln(3)
+            pdf.set_font(default_font, "B", 9)
+            pdf.set_x(pdf.l_margin)
+            pdf.multi_cell(0, 5, f"V-Inconsistency: {regional_result['v_inconsistency']} | E-Inconsistency: {regional_result['e_inconsistency']}", align="C")
+            pdf.set_font(default_font, "I", 9)
+            pdf.multi_cell(0, 5, clean_text(regional_result.get("explanation", "")))
+        except Exception: pass
+        pdf.ln(5)
 
     # ─── Metadata Analysis ───────────────────────────────
     if metadata_result:
@@ -279,7 +394,8 @@ def generate_report(
                 pdf.ln(3)
                 pdf.set_font(default_font, "I", 8)
                 pdf.set_text_color(113, 128, 150)
-                pdf.cell(0, 5, "FFT Power Spectrum (center = low frequency, edges = high frequency)", align="C", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 5, "FFT Power Spectrum (center = low frequency, edges = high frequency)", align="C")
             except Exception:
                 pass
         pdf.ln(5)
@@ -307,7 +423,8 @@ def generate_report(
                 pdf.ln(3)
                 pdf.set_font(default_font, "I", 8)
                 pdf.set_text_color(113, 128, 150)
-                pdf.cell(0, 5, "ELA Heatmap — brighter regions indicate compression inconsistencies", align="C", new_x="LMARGIN", new_y="NEXT")
+                pdf.set_x(pdf.l_margin)
+                pdf.multi_cell(0, 5, "ELA Heatmap — brighter regions indicate compression inconsistencies", align="C")
             except Exception:
                 pass
 
@@ -347,7 +464,8 @@ def _add_section_header(pdf: FPDF, title: str):
     font_family = pdf.font_family if "DejaVu" in pdf.font_family else "Helvetica"
     pdf.set_font(font_family, "B", 13)
     pdf.set_text_color(0, 212, 255)
-    pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
+    pdf.set_x(pdf.l_margin)
+    pdf.multi_cell(0, 10, title)
     pdf.set_draw_color(0, 212, 255)
     pdf.set_line_width(0.3)
     pdf.line(10, pdf.get_y(), 120, pdf.get_y())
@@ -355,12 +473,19 @@ def _add_section_header(pdf: FPDF, title: str):
 
 
 def _add_detail(pdf: FPDF, label: str, value: str):
-    """Add a key-value detail line."""
+    """Add a key-value detail line with robust width handling."""
     font_family = pdf.font_family if "DejaVu" in pdf.font_family else "Helvetica"
     pdf.set_font(font_family, "B", 9)
     pdf.set_text_color(136, 146, 176)
-    x_start = pdf.get_x()
+    
+    # Reset to left margin if not already there
+    if pdf.get_x() > pdf.l_margin + 1:
+        pdf.ln(5)
+        
     pdf.cell(50, 5, f"{label}:")
     pdf.set_font(font_family, "", 9)
     pdf.set_text_color(226, 232, 240)
-    pdf.cell(0, 5, value, new_x="LMARGIN", new_y="NEXT")
+    
+    # Use epw (effective page width) minus the 50 we used for label
+    val_width = pdf.epw - 50
+    pdf.multi_cell(val_width, 5, str(value))

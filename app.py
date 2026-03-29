@@ -27,7 +27,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend.models.convnext import build_model
 from backend.transforms import test_transforms
 from backend.services.gradcam_service import generate_heatmap
-from backend.services.gemini_forensics import configure_gemini, analyze_image_forensically
+from backend.services.gemini_forensics import configure_gemini, analyze_image_forensically, generate_expert_summary
+
+# Initialize Gemini with the latest key from .env
+configure_gemini()
 from backend.services.score_combiner import combine_verdicts
 from backend.services.classifier import load_model, classify_image, get_model_for_gradcam
 from backend.services.metadata_analyzer import analyze_metadata
@@ -35,7 +38,9 @@ from backend.services.frequency_analyzer import analyze_frequency
 from backend.services.ela_analyzer import analyze_ela
 from backend.services.report_generator import generate_report
 from backend.services.checkpoint_downloader import download_checkpoint, is_checkpoint_available
-from backend.services.vit_deepfake_service import analyze_vit, load_vit_model
+from backend.services.vit_service import analyze_vit_regional as analyze_vit, load_vit_model
+from backend.services.anatomy_analyzer import analyze_anatomy
+from backend.services.regional_analyzer import analyze_regional_inconsistency as analyze_regional
 
 # ─── Page Config ─────────────────────────────────────────────
 st.set_page_config(
@@ -694,41 +699,79 @@ with tab_analyze:
     with col_result:
         st.markdown('<div class="section-header">📋 Analysis Results</div>', unsafe_allow_html=True)
 
-        if image and analyze_btn:
-            start_time = time.time()
+        using_cached = False
+        if image and not analyze_btn:
+            if "last_analysis" in st.session_state and st.session_state.last_analysis.get("source_name") == source_name:
+                using_cached = True
 
-            # ─── Engine 1: ML Classification ──────────
-            with st.spinner("🧠 Engine 1: ConvNeXtV2 classifying..."):
-                ml_result = classify_image(image, threshold)
-
-            # ─── Grad-CAM ─────────────────────────────
-            with st.spinner("🎨 Generating Grad-CAM heatmap..."):
-                try:
-                    heatmap_b64, raw_cam_b64 = generate_heatmap(image, target_class=1)
-                except Exception as e:
-                    st.warning(f"Grad-CAM unavailable: {e}")
-                    heatmap_b64, raw_cam_b64 = None, None
-
-            # ─── Engine 2: Gemini Forensics ───────────
-            gemini_result = None
-            if use_gemini:
-                with st.spinner("🔮 Engine 2: Gemini forensic analysis..."):
+        if image and (analyze_btn or using_cached):
+            if using_cached:
+                la = st.session_state.last_analysis
+                ml_result = la.get("ml_result")
+                heatmap_b64 = la.get("heatmap_b64")
+                raw_cam_b64 = la.get("raw_cam_b64")
+                gemini_result = la.get("gemini_result")
+                vit_result = la.get("vit_result")
+                anatomy_result = la.get("anatomy_result")
+                regional_result = la.get("regional_result")
+                metadata_result = la.get("metadata_result")
+                frequency_result = la.get("frequency_result")
+                ela_result = la.get("ela_result")
+                combined = la.get("combined")
+                processing_time = la.get("processing_time", 0.0)
+                engines_used = len(combined.get("analysis_engines", ["ConvNeXtV2"]))
+            else:
+                start_time = time.time()
+    
+                # ─── Engine 1: ML Classification ──────────
+                with st.spinner("🧠 Engine 1: ConvNeXtV2 classifying..."):
+                    ml_result = classify_image(image, threshold)
+    
+                # ─── Grad-CAM ─────────────────────────────
+                with st.spinner("🎨 Generating Grad-CAM heatmap..."):
                     try:
-                        gemini_result = asyncio.run(analyze_image_forensically(image))
+                        heatmap_b64, raw_cam_b64 = generate_heatmap(image, target_class=1)
                     except Exception as e:
-                        st.warning(f"Gemini unavailable: {e}")
-                        
-            # ─── Engine 3: Vision Transformer ─────────
-            vit_result = None
-            with st.spinner("👁️ Engine 3: ViT deepfake analysis..."):
-                try:
-                    vit_result = analyze_vit(image)
-                except Exception as e:
-                    st.warning(f"ViT unavailable: {e}")
-
-            # ─── Signal 3: Metadata ───────────────────
-            metadata_result = None
-            if run_metadata:
+                        st.warning(f"Grad-CAM unavailable: {e}")
+                        heatmap_b64, raw_cam_b64 = None, None
+    
+                # ─── Engine 2: Gemini Forensics ───────────
+                gemini_result = None
+                if use_gemini:
+                    with st.spinner("🔮 Engine 2: Gemini forensic analysis..."):
+                        try:
+                            gemini_result = asyncio.run(analyze_image_forensically(image))
+                        except Exception as e:
+                            st.warning(f"Gemini unavailable: {e}")
+                            
+                # ─── Engine 3: Vision Transformer ─────────
+                vit_result = None
+                with st.spinner("👁️ Engine 3: ViT Regional analysis..."):
+                    try:
+                        vit_result = analyze_vit(image)
+                    except Exception as e:
+                        st.warning(f"ViT unavailable: {e}")
+    
+                # ─── Anatomy Check ────────────────────────
+                anatomy_result = None
+                with st.spinner("🦴 Analyzing anatomical consistency..."):
+                    try:
+                        anatomy_result = analyze_anatomy(image)
+                    except Exception as e:
+                        st.warning(f"Anatomy check failed: {e}")
+    
+                # ─── Regional Inconsistency ───────────────
+                regional_result = None
+                with st.spinner("🧩 Checking regional inconsistencies..."):
+                    try:
+                        regional_result = analyze_regional(image)
+                    except Exception as e:
+                        st.warning(f"Regional check failed: {e}")
+    
+                # ─── Signal 3: Metadata ───────────────────
+                metadata_result = None
+                is_live_camera = False
+                
                 with st.spinner("📋 Analyzing metadata..."):
                     try:
                         raw_bytes = None
@@ -738,77 +781,124 @@ with tab_analyze:
                         elif input_method == "📸 Camera" and camera_file:
                             camera_file.seek(0)
                             raw_bytes = camera_file.read()
-                        metadata_result = analyze_metadata(image, raw_bytes)
+                            is_live_camera = True
+                            
+                        if run_metadata:
+                            metadata_result = analyze_metadata(image, raw_bytes)
+                            
+                        # Ensure camera flag is passed to the engine
+                        if is_live_camera:
+                            if metadata_result is None:
+                                metadata_result = {}
+                            metadata_result["is_live_camera"] = True
                     except Exception as e:
                         st.warning(f"Metadata analysis failed: {e}")
-
-            # ─── Signal 4: Frequency ──────────────────
-            frequency_result = None
-            if run_frequency:
-                with st.spinner("📊 FFT spectral analysis..."):
+    
+                # ─── Signal 4: Frequency ──────────────────
+                frequency_result = None
+                if run_frequency:
+                    with st.spinner("📊 FFT spectral analysis..."):
+                        try:
+                            frequency_result = analyze_frequency(image)
+                        except Exception as e:
+                            st.warning(f"Frequency analysis failed: {e}")
+    
+                # ─── Signal 5: ELA ────────────────────────
+                ela_result = None
+                if run_ela:
+                    with st.spinner("🔬 Error Level Analysis..."):
+                        try:
+                            ela_result = analyze_ela(image)
+                        except Exception as e:
+                            st.warning(f"ELA failed: {e}")
+    
+                # ─── Combine Verdicts ─────────────────────
+                combined = combine_verdicts(
+                    ml_result, 
+                    gemini_result, 
+                    vit_result, 
+                    metadata_result, 
+                    frequency_result, 
+                    ela_result,
+                    anatomy_result,
+                    regional_result
+                )
+                
+                # --- Expert Investigative Summary ---
+                with st.spinner("🕵️ Finalizing expert investigative summary..."):
                     try:
-                        frequency_result = analyze_frequency(image)
+                        signals = {
+                            "ml_result": ml_result,
+                            "vit_result": vit_result,
+                            "gemini_result": gemini_result,
+                            "anatomy_result": anatomy_result,
+                            "regional_result": regional_result,
+                            "metadata_result": metadata_result,
+                            "combined": combined
+                        }
+                        expert_statement = asyncio.run(generate_expert_summary(signals))
+                        combined["expert_statement"] = expert_statement
                     except Exception as e:
-                        st.warning(f"Frequency analysis failed: {e}")
-
-            # ─── Signal 5: ELA ────────────────────────
-            ela_result = None
-            if run_ela:
-                with st.spinner("🔬 Error Level Analysis..."):
-                    try:
-                        ela_result = analyze_ela(image)
-                    except Exception as e:
-                        st.warning(f"ELA failed: {e}")
-
-            # ─── Combine Verdicts ─────────────────────
-            combined = combine_verdicts(ml_result, gemini_result, vit_result, metadata_result, frequency_result, ela_result)
-            processing_time = round(time.time() - start_time, 2)
-
-            # Update stats
-            if combined["final_label"] == "Fake":
-                st.session_state.total_fake += 1
-            else:
-                st.session_state.total_real += 1
-
-            # Store results in session for Deep Forensics tab
-            st.session_state.last_analysis = {
-                "image": image,
-                "ml_result": ml_result,
-                "gemini_result": gemini_result,
-                "vit_result": vit_result,
-                "metadata_result": metadata_result,
-                "frequency_result": frequency_result,
-                "ela_result": ela_result,
-                "combined": combined,
-                "heatmap_b64": heatmap_b64,
-                "raw_cam_b64": raw_cam_b64,
-                "processing_time": processing_time,
-                "source_name": source_name,
-            }
+                        combined["expert_statement"] = f"Summary engine error: {str(e)}"
+    
+                processing_time = round(time.time() - start_time, 2)
+    
+                # Update stats (only when analyzing fresh)
+                verdict_lbl = combined["final_label"].lower()
+                if "ai" in verdict_lbl or "fake" in verdict_lbl or "suspicious" in verdict_lbl:
+                    st.session_state.total_fake += 1
+                else:
+                    st.session_state.total_real += 1
+    
+                # Store results in session for Deep Forensics tab
+                st.session_state.last_analysis = {
+                    "image": image,
+                    "ml_result": ml_result,
+                    "gemini_result": gemini_result,
+                    "vit_result": vit_result,
+                    "anatomy_result": anatomy_result,
+                    "regional_result": regional_result,
+                    "metadata_result": metadata_result,
+                    "frequency_result": frequency_result,
+                    "ela_result": ela_result,
+                    "combined": combined,
+                    "heatmap_b64": heatmap_b64,
+                    "raw_cam_b64": raw_cam_b64,
+                    "vit_heatmap_b64": vit_result.get("heatmap_b64") if vit_result else None,
+                    "processing_time": processing_time,
+                    "source_name": source_name,
+                }
 
             # ─── Display Turnitin-Style Verdict ──────────────────────
             # Calculate total AI probability percentage
-            fake_prob_pct = int(combined.get("combined_fake_probability", combined["final_confidence"] if combined["final_label"] == "Fake" else (1-combined["final_confidence"])) * 100)
+            fake_prob_pct = int(combined.get("combined_fake_probability", 0) * 100)
             
-            if fake_prob_pct >= 70:
-                color = "#ff3b30"
+            if "Suspicious" in combined["final_label"] or combined["final_label"] == "Partially AI Generated":
+                color = "#ff9500" # Orange
+                idx_label = combined["final_label"]
+                idx_desc = "Structural anomalies or regional AI generation detected."
+            elif fake_prob_pct >= 55:
+                color = "#ff3b30" # Red
                 idx_label = "AI-Generated"
                 idx_desc = "Highly likely generated by an AI model or deeply manipulated."
-            elif fake_prob_pct >= 40:
-                color = "#ff9500"
-                idx_label = "Suspicious"
-                idx_desc = "Contains algorithmic anomalies or significant digital alterations."
+            elif fake_prob_pct >= 35:
+                color = "#ffcc00" # Yellow
+                idx_label = "Inconclusive"
+                idx_desc = "Manual review recommended. Contains subtle algorithmic artifacts."
+            elif "Possible False Positive" in combined["final_label"]:
+                color = "#ff9500" # Orange
+                idx_label = "Possible False Positive"
+                idx_desc = "Image scored high for AI generation but contains strong physical hardware markers (EXIF, natural noise). Manual review recommended."
             else:
-                color = "#00ff88"
+                color = "#00ff88" # Green
                 idx_label = "Authentic (Real)"
                 idx_desc = "No significant AI generation signatures detected."
 
             prob_gen = combined.get("probable_generator", "Unknown")
-            source_text = f"<br><span style='color: #00d4ff; font-weight: 600;'>🎯 Detected Source: {prob_gen}</span>" if prob_gen and prob_gen != "Unknown" else ""
-            gemini_tag = "<span class='engine-tag engine-gemini'>🔮 Gemini</span>" if gemini_result and gemini_result.get("confidence", 0) > 0 else ""
+            source_text = f"<br><span style='color: #00d4ff; font-weight: 600;'>🎯 Detected Source: {prob_gen}</span>" if prob_gen and prob_gen != "Unknown" and color == "#ff3b30" else ""
+            gemini_tag = "<span style='background: rgba(123,47,247,0.2); color: #c4b5fd; border: 1px solid rgba(123,47,247,0.4); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem;'>🔮 Gemini</span>" if gemini_result and gemini_result.get("confidence", 0) > 0 else ""
 
-            import textwrap
-            html_content = textwrap.dedent(f"""
+            html_content = f"""
             <div style="display: flex; align-items: center; background: rgba(255,255,255,0.03); padding: 24px; border-radius: 16px; border-left: 8px solid {color}; margin-bottom: 24px; box-shadow: 0 4px 24px rgba(0,0,0,0.2);">
                 <div style="min-width: 140px; text-align: center; border-right: 1px solid rgba(255,255,255,0.1); margin-right: 24px;">
                     <h1 style="font-size: 3.8rem; font-weight: 900; margin: 0; color: {color}; line-height: 1;">{fake_prob_pct}%</h1>
@@ -818,15 +908,51 @@ with tab_analyze:
                     <p style="margin: 0; color: #a0aec0; font-size: 0.95rem; line-height: 1.4;">
                         {idx_desc}{source_text}
                     </p>
-                    <div style="margin-top: 12px;">
-                        <span class="engine-tag engine-ml">🧠 ConvNeXtV2</span>
-                        <span class="engine-tag engine-vit" style="background: rgba(123,47,247,0.2); color: #c4b5fd; border: 1px solid rgba(123,47,247,0.4); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; margin-right: 8px;">👁️ ViT Context</span>
+                    <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px;">
+                        <span style="background: rgba(123,47,247,0.2); color: #c4b5fd; border: 1px solid rgba(123,47,247,0.4); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem;">🧠 ConvNeXtV2</span>
+                        <span style="background: rgba(123,47,247,0.2); color: #c4b5fd; border: 1px solid rgba(123,47,247,0.4); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem;">👁️ Regional ViT</span>
+                        <span style="background: rgba(0,212,255,0.1); color: #00d4ff; border: 1px solid rgba(0,212,255,0.3); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem;">🦴 Anatomy Check</span>
                         {gemini_tag}
                     </div>
                 </div>
             </div>
-            """)
+            """
             st.markdown(html_content, unsafe_allow_html=True)
+
+            # Warning if physical photo metrics are heavily penalized
+            if combined.get("false_positive_warning"):
+                st.warning("⚠️ **System Warning:** The ConvNeXt/ViT models scored this image very high for synthesis, but DeepSight's forensic physics engine verified explicit hardware sensor data (EXIF / Natural Grain). Treat the AI prediction cautiously.")
+                
+            if gemini_result and gemini_result.get("overall_verdict", "").lower() == "fake" and combined.get("is_strong_real_photo"):
+                st.warning("⚠️ **Note:** AI semantic analysis (Gemini) conflicts with metadata and noise analysis — treat with caution.")
+
+            with st.expander("ℹ️ How is this verdict calculated?"):
+                st.markdown("The **AI Probability Index** is a weighted ensemble score combining structural anomalies, texture analysis, regional patch-checking, and metadata risk. If an explicit anatomical anomaly (like an extra appendage) is found, it acts as a high-priority override, pushing the index directly to **Suspicious / AI-Generated**.")
+
+            if combined.get("is_strong_real_photo") and color == "#00ff88":
+                with st.expander("✅ Real Photo Indicators", expanded=True):
+                    st.markdown("""
+                    **The system definitively classified this as a Real Photograph because of these physical markers:**
+                    - ✅ **Hardware EXIF Present:** The image contains embedded camera/smart-phone lens data.
+                    - ✅ **Natural Sensor Noise:** Fast-Fourier Transform (FFT) detected organic shot noise, not synthetic checkerboard grids.
+                    - ✅ **Consistent Compression:** Error Level Analysis shows uniform physical compression across regions.
+                    - ✅ **Anatomical Coherence:** Passed rigid human-joint checks with no impossibilities detected.
+                    """)
+
+
+            # Expert Closing Statement Panel
+            if combined.get("expert_statement"):
+                st.markdown(f"""
+                <div style="background: rgba(123, 47, 247, 0.05); border: 1px dashed rgba(123, 47, 247, 0.3); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+                    <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                        <span style="font-size: 1.2rem; margin-right: 8px;">⚖️</span>
+                        <strong style="color: #a78bfa; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">Final Investigative Closing Statement</strong>
+                    </div>
+                    <p style="margin: 0; color: #e2e8f0; font-size: 1rem; line-height: 1.6; font-style: italic;">
+                        "{combined['expert_statement']}"
+                    </p>
+                </div>
+                """, unsafe_allow_html=True)
 
             st.markdown("")
 
@@ -851,6 +977,7 @@ with tab_analyze:
 
             # ─── Multi-Signal Diagnostic Chart ─────────────────
             st.markdown("##### 📊 Multi-Signal Diagnostic Breakdown")
+            st.caption("Visual representation of risk levels evaluated across independent analytical layers.")
             
             # Construct dictionary for chart
             chart_data = {
@@ -925,12 +1052,16 @@ with tab_analyze:
                     heatmap_bytes = base64.b64decode(heatmap_b64)
                     heatmap_img = Image.open(io.BytesIO(heatmap_bytes))
                     st.image(heatmap_img, caption="Grad-CAM Overlay", use_container_width=True)
+                
+                with st.expander("ℹ️ How to interpret this heatmap"):
+                    st.markdown("The **Grad-CAM (Gradient-weighted Class Activation Mapping)** visualization highlights the specific pixels the ConvNeXtV2 model focused on. **Warmer colors (red/orange)** indicate regions exhibiting high synthetic texture anomalies or blending errors.")
 
             st.divider()
 
             # ─── Artifact Breakdown ───────────────────
             if gemini_result and gemini_result.get("artifacts"):
                 st.markdown("##### 🔬 6-Category Artifact Breakdown")
+                st.caption("Deep inspection of lighting, physics, anatomy, and structural consistency.")
 
                 artifacts = gemini_result["artifacts"]
                 cols = st.columns(3)
@@ -1071,8 +1202,8 @@ with tab_forensics:
             col_meta1, col_meta2 = st.columns([1, 1])
 
             with col_meta1:
-                st.metric("Metadata Risk Score", f"{meta['risk_score']}/100")
-                st.metric("EXIF Fields Found", meta["exif_count"])
+                st.metric("Metadata Risk Score", f"{meta['risk_score']}/100", help="Normal Range: 0-30. Scores > 70 strongly indicate the image was generated by an AI service that strips metadata.")
+                st.metric("EXIF Fields Found", meta["exif_count"], help="Normal Range: 15+. Photographed images typically contain rich EXIF data (GPS, Lens, F-Stop). AI generators output 0.")
                 st.metric("Camera Info", "✅ Yes" if meta["has_camera_info"] else "❌ No")
                 st.metric("GPS Data", "✅ Yes" if meta["has_gps"] else "❌ No")
                 st.metric("Capture Date", "✅ Yes" if meta["has_datetime"] else "❌ No")
@@ -1113,12 +1244,12 @@ with tab_forensics:
             col_f1, col_f2 = st.columns([1, 1])
 
             with col_f1:
-                st.metric("Frequency Risk Score", f"{freq['risk_score']}/100")
+                st.metric("Frequency Risk Score", f"{freq['risk_score']}/100", help="Normal Range: 0-30. Scores > 70 suggest synthetic high-frequency noise patterns.")
                 metrics = freq.get("metrics", {})
-                st.metric("High-Freq Ratio", f"{metrics.get('high_freq_ratio', 0):.4f}")
-                st.metric("Grid Score", f"{metrics.get('grid_score', 0)}/100")
-                st.metric("Peak Anomalies", metrics.get("peak_count", 0))
-                st.metric("Azimuthal Uniformity", f"{metrics.get('azimuthal_uniformity', 0):.1f}%")
+                st.metric("High-Freq Ratio", f"{metrics.get('high_freq_ratio', 0):.4f}", help="Normal Range: ~0.01-0.15. AI generators often smear high frequencies, creating unnaturally smooth ratios.")
+                st.metric("Grid Score", f"{metrics.get('grid_score', 0)}/100", help="Normal Range: 0-20. High grid scores indicate upscaling artifacts (checkerboard patterns) typical of GANs/Diffusion.")
+                st.metric("Peak Anomalies", metrics.get("peak_count", 0), help="Normal Range: 0. Any isolated frequency peak usually indicates repeating manipulative patterns (like deepfake blending).")
+                st.metric("Azimuthal Uniformity", f"{metrics.get('azimuthal_uniformity', 0):.1f}%", help="Normal Range: < 60%. Highly uniform frequencies (>80%) suggest artificial, perfectly generated noise.")
 
             with col_f2:
                 spectrum_b64 = freq.get("spectrum_base64")
@@ -1166,9 +1297,9 @@ with tab_forensics:
             # ELA metrics
             col_m1, col_m2 = st.columns(2)
             with col_m1:
-                st.metric("ELA Risk Score", f"{ela['risk_score']}/100")
+                st.metric("ELA Risk Score", f"{ela['risk_score']}/100", help="Normal Range: 0-30. Risk > 70 indicates substantial saving/compression inconsistencies often found in spliced or AI-edited regions.")
                 metrics = ela.get("metrics", {})
-                st.metric("Mean Error", f"{metrics.get('mean_error', 0):.4f}")
+                st.metric("Mean Error", f"{metrics.get('mean_error', 0):.4f}", help="Normal Range: 2.0-6.0. Extraneous mean error points to heavily modified pixel compression blocks.")
                 st.metric("Std Error", f"{metrics.get('std_error', 0):.4f}")
 
             with col_m2:

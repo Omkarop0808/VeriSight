@@ -18,3 +18,4 @@ matplotlib>=3.7.0
 huggingface-hub>=0.20.0
 requests>=2.31.0
 transformers>=4.40.0
+mediapipe>=0.10.0

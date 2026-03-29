@@ -16,90 +16,116 @@ def combine_verdicts(
     metadata_result: dict = None,
     frequency_result: dict = None,
     ela_result: dict = None,
+    anatomy_result: dict = None,
+    regional_result: dict = None,
 ) -> dict:
     """
     Combine all analysis results into a final verdict.
-    Tri-Engine Ensemble:
-    - Engine 1: ConvNeXtV2 (Texture Focus) - 35% weight
-    - Engine 2: Gemini Flash (Anatomy Focus) - 30% weight
-    - Engine 3: Vision Transformer (Context/Anomaly Focus) - 35% weight
+    Tri-Engine Ensemble + Advanced Forensics.
     """
     ml_fake_prob = ml_result.get("fake_probability", 0.0)
-    ml_label = ml_result.get("label", "Real")
-    
     vit_fake_prob = vit_result.get("fake_probability", ml_fake_prob) if vit_result else ml_fake_prob
-
-    # ─── Fallback Mode (If Gemini Fails) ────────────────────────────────────
-    if gemini_result is None or gemini_result.get("confidence", 0) == 0:
-        combined_fake_prob = (ml_fake_prob * 0.50) + (vit_fake_prob * 0.50)
-        base_result = {
-            "final_label": "Fake" if combined_fake_prob > 0.5 else "Real",
-            "final_confidence": round(combined_fake_prob if combined_fake_prob > 0.5 else (1 - combined_fake_prob), 4),
-            "ml_weight": 0.50,
-            "gemini_weight": 0.0,
-            "vit_weight": 0.50,
-            "agreement": (ml_fake_prob > 0.5) == (vit_fake_prob > 0.5),
-            "risk_level": _get_risk_level(combined_fake_prob),
-            "analysis_engines": ["ConvNeXtV2", "ViT"] if vit_result else ["ConvNeXtV2"],
-        }
-        # Apply auxiliary signal bonuses
-        base_result = _apply_auxiliary_bonuses(base_result, metadata_result, frequency_result, ela_result)
-        return base_result
-
+    
     # ─── Parse Gemini Verdict ────────────────────────────
-    gemini_verdict = gemini_result.get("overall_verdict", "Unknown")
-    gemini_confidence = gemini_result.get("confidence", 0.5)
-
-    if gemini_verdict.lower() == "fake":
-        gemini_fake_prob = gemini_confidence
-    elif gemini_verdict.lower() == "real":
-        gemini_fake_prob = 1.0 - gemini_confidence
+    if gemini_result and gemini_result.get("confidence", 0) > 0:
+        gemini_verdict = gemini_result.get("overall_verdict", "Unknown")
+        gemini_confidence = gemini_result.get("confidence", 0.5)
+        if gemini_verdict.lower() == "fake":
+            gemini_fake_prob = gemini_confidence
+        elif gemini_verdict.lower() == "real":
+            gemini_fake_prob = 1.0 - gemini_confidence
+        else:
+            gemini_fake_prob = 0.5
     else:
-        gemini_fake_prob = 0.5
+        gemini_fake_prob = (ml_fake_prob + vit_fake_prob) / 2
 
-    # ─── Tri-Engine Weighted Combination ─────────────────
+    # ─── Confidence-Weighted / Max-Pooling Override ───────
+    # If any engine is EXTREMELY confident (>95%), it should bias the result significantly
+    # This prevents high-confidence regional signals from being averaged into "Real"
+    
+    # Standard weighted average
     ml_weight = 0.35
     vit_weight = 0.35
     gemini_weight = 0.30
-
-    combined_fake_prob = (ml_fake_prob * ml_weight) + (vit_fake_prob * vit_weight) + (gemini_fake_prob * gemini_weight)
-
-    # ─── Agreement Analysis ──────────────────────────────
-    ml_says_fake = ml_fake_prob > 0.5
-    vit_says_fake = vit_fake_prob > 0.5
-    gemini_says_fake = gemini_fake_prob > 0.5
+    weighted_avg = (ml_fake_prob * ml_weight) + (vit_fake_prob * vit_weight) + (gemini_fake_prob * gemini_weight)
     
-    engines_say_fake = sum([ml_says_fake, vit_says_fake, gemini_says_fake])
+    # Max-Pooling Override (Aggressive Forensic Bias)
+    max_conf = max(ml_fake_prob, vit_fake_prob, gemini_fake_prob)
     
-    if engines_say_fake >= 2:
-        # Majority agree it's fake
-        combined_fake_prob = max(combined_fake_prob, 0.65)
-    elif engines_say_fake == 0:
-        # All agree real
-        combined_fake_prob = min(combined_fake_prob, 0.35)
+    if max_conf > 0.95:
+        # If any engine is extremely sure, we force the verdict to High Risk
+        combined_fake_prob = max(weighted_avg, 0.85 if max_conf > 0.98 else 0.75)
+    elif max_conf > 0.80:
+        # Significant partial signal
+        combined_fake_prob = max(weighted_avg, 0.65)
+    elif max_conf > 0.60:
+        # Noticeable signal
+        combined_fake_prob = max(weighted_avg, 0.45)
     else:
-        # 1 says fake, 2 say real. Check Gemini Artifacts to break tie
-        artifact_avg = _get_artifact_average(gemini_result.get("artifacts", []))
-        if artifact_avg > 60:
-             combined_fake_prob = max(combined_fake_prob, 0.55) # Gemini spotted critical artifact
+        combined_fake_prob = weighted_avg
 
-    # ─── Anatomy Override (User request: catch extra hands) ─────────
-    # If Gemini is extremely confident about an anatomy error, override weights
-    anatomy_score = next((a.get("score", 0) for a in gemini_result.get("artifacts", []) if a.get("category") == "Anatomy & Proportions"), 0)
-    if anatomy_score >= 90:
-         # Force fake probability higher if blatant anatomy error exists
-         combined_fake_prob = max(combined_fake_prob, 0.85)
-         gemini_weight = 0.80 # Temporarily boost gemini's influence
+    # ─── PRE-CLASSIFICATION (Real Photo Indicators) ───────
+    has_exif = metadata_result.get("exif_count", 0) > 0 if metadata_result else False
+    has_camera_info = metadata_result.get("has_camera_info", False) if metadata_result else False
+    
+    # Check for natural noise via Frequency Analysis. Low grid score + low high_freq_ratio usually means natural sensor noise.
+    freq_grid_score = frequency_result.get("metrics", {}).get("grid_score", 100) if frequency_result else 100
+    natural_noise = freq_grid_score < 25 # Natural physics rarely produces checkerboard frequencies.
 
-    # ─── Final Verdict Logic ────────────────────────────
-    if combined_fake_prob >= 0.70:
-        final_label = "Fake"
-    elif combined_fake_prob >= 0.40:
-        final_label = "Potential Fake"
+    is_live_camera = metadata_result.get("is_live_camera", False) if metadata_result else False
+
+    # Identify if it is strongly likely to be a real, physical photograph
+    is_strong_real_photo = has_camera_info or (has_exif and natural_noise) or is_live_camera
+    
+    if is_live_camera:
+        # Hard penalty to AI score. A live hardware feed is definitively a real physical capture.
+        combined_fake_prob = min(combined_fake_prob * 0.20, 0.15)
+        ml_fake_prob *= 0.10
+        vit_fake_prob *= 0.10
+
+    # ─── Conflict Detection: Are engines highly discordant?
+    discordant = False
+    if (ml_fake_prob < 0.10 and vit_fake_prob > 0.85) or (ml_fake_prob > 0.85 and vit_fake_prob < 0.10):
+        discordant = True
+        # If highly discordant but it's a strongly proven real photo, trust the metadata instead of defaulting to "Partially Fake"
+        if combined_fake_prob < 0.50 and not is_strong_real_photo:
+            combined_fake_prob = 0.51 
+
+    # ─── Anomaly Detection (High Priority Overrides) ──────
+    has_anatomy_anomaly = anatomy_result.get("is_suspicious", False) if anatomy_result else False
+    has_regional_anomaly = regional_result.get("is_inconsistent", False) if regional_result else False
+    vit_partial_anomaly = vit_result.get("is_partially_fake", False) if vit_result else False
+
+    # ─── Final Verdict Logic (Dynamic Thresholds) ─────────
+    # If standard threshold is 55%, a confirmed camera photo requires 75% to be declared heavily manipulated.
+    ai_threshold = 0.75 if is_strong_real_photo else 0.55
+    inconclusive_threshold = 0.55 if is_strong_real_photo else 0.35
+
+    if has_anatomy_anomaly:
+        final_label = "Suspicious — Anomaly Detected"
+    elif combined_fake_prob >= ai_threshold:
+        final_label = "AI Generated"
+    elif inconclusive_threshold <= combined_fake_prob < ai_threshold:
+        if has_regional_anomaly or vit_partial_anomaly:
+            final_label = "Partially AI Generated"
+        elif is_strong_real_photo:
+            final_label = "Possible False Positive — Manual Review Required"
+        else:
+            final_label = "Inconclusive"
     else:
-        final_label = "Real"
+        final_label = "Likely Real"
 
-    final_confidence = combined_fake_prob if combined_fake_prob >= 0.40 else (1 - combined_fake_prob)
+    # Push a flag to the UI indicating if a confirmed camera photo is being penalized heavily by ML/ViT
+    false_positive_warning = (is_strong_real_photo and combined_fake_prob >= ai_threshold)
+
+    final_confidence = combined_fake_prob if combined_fake_prob >= 0.5 else (1 - combined_fake_prob)
+
+    # ─── Calculate Agreement ─────────────────────────────
+    # High agreement if ML, ViT, and Gemini all favor the same side (>0.5 or <=0.5)
+    ml_fake = ml_fake_prob > 0.5
+    vit_fake = vit_fake_prob > 0.5
+    gem_fake = gemini_fake_prob > 0.5
+    agreement = (ml_fake == vit_fake == gem_fake)
 
     result = {
         "final_label": final_label,
@@ -108,75 +134,30 @@ def combine_verdicts(
         "ml_weight": ml_weight,
         "vit_weight": vit_weight,
         "gemini_weight": gemini_weight,
-        "agreement": engines_say_fake in [0, 3], # Absolute agreement
-        "risk_level": _get_risk_level(combined_fake_prob),
+        "risk_level": _get_risk_level(combined_fake_prob, has_anatomy_anomaly),
         "analysis_engines": ["ConvNeXtV2", "ViT", "Gemini"],
-        "probable_generator": gemini_result.get("probable_generator", "Unknown"),
+        "probable_generator": gemini_result.get("probable_generator", "Unknown") if gemini_result else "Unknown",
+        "anomalies_detected": has_anatomy_anomaly or has_regional_anomaly,
+        "agreement": agreement,
+        "is_discordant": discordant,
+        "is_strong_real_photo": is_strong_real_photo,
+        "false_positive_warning": false_positive_warning
     }
 
     # Apply auxiliary signal bonuses
     result = _apply_auxiliary_bonuses(result, metadata_result, frequency_result, ela_result)
-
     return result
 
 
-def _apply_auxiliary_bonuses(
-    result: dict,
-    metadata_result: dict = None,
-    frequency_result: dict = None,
-    ela_result: dict = None,
-) -> dict:
-    """Apply bonus confidence modifiers from auxiliary analysis signals."""
-    auxiliary_scores = []
-    auxiliary_details = {}
-
-    if metadata_result:
-        meta_risk = metadata_result.get("risk_score", 0)
-        auxiliary_scores.append(meta_risk)
-        auxiliary_details["metadata_risk"] = meta_risk
-        if "Metadata" not in result.get("analysis_engines", []):
-            result.setdefault("analysis_engines", []).append("Metadata")
-
-    if frequency_result:
-        freq_risk = frequency_result.get("risk_score", 0)
-        auxiliary_scores.append(freq_risk)
-        auxiliary_details["frequency_risk"] = freq_risk
-        if "FFT" not in result.get("analysis_engines", []):
-            result.setdefault("analysis_engines", []).append("FFT")
-
-    if ela_result:
-        ela_risk = ela_result.get("risk_score", 0)
-        auxiliary_scores.append(ela_risk)
-        auxiliary_details["ela_risk"] = ela_risk
-        if "ELA" not in result.get("analysis_engines", []):
-            result.setdefault("analysis_engines", []).append("ELA")
-
-    if auxiliary_scores:
-        avg_aux = sum(auxiliary_scores) / len(auxiliary_scores)
-        auxiliary_details["average_auxiliary_risk"] = round(avg_aux, 2)
-
-        # Moderate confidence adjustment based on auxiliary signals
-        current_confidence = result["final_confidence"]
-        if avg_aux > 60 and result["final_label"] == "Fake":
-            boost = min(0.05, (avg_aux - 60) / 800)
-            result["final_confidence"] = round(min(0.99, current_confidence + boost), 4)
-            result["combined_fake_probability"] = result["final_confidence"]
-        elif avg_aux < 20 and result["final_label"] == "Real":
-            boost = min(0.05, (20 - avg_aux) / 800)
-            result["final_confidence"] = round(min(0.99, current_confidence + boost), 4)
-            result["combined_fake_probability"] = round(1.0 - result["final_confidence"], 4)
-
-    result["auxiliary_analysis"] = auxiliary_details
-    return result
-
-
-def _get_risk_level(fake_probability: float) -> str:
-    """Determine risk level based on fake probability."""
+def _get_risk_level(fake_probability: float, has_anomaly: bool = False) -> str:
+    """Determine risk level based on fake probability and anomalies."""
+    if has_anomaly:
+        return "Suspicious"
     if fake_probability >= 0.85:
         return "Critical"
-    elif fake_probability >= 0.65:
+    elif fake_probability >= 0.55:
         return "High"
-    elif fake_probability >= 0.40:
+    elif fake_probability >= 0.35:
         return "Medium"
     else:
         return "Low"
@@ -188,3 +169,22 @@ def _get_artifact_average(artifacts: list) -> float:
         return 0.0
     scores = [a.get("score", 0) for a in artifacts]
     return sum(scores) / len(scores) if scores else 0.0
+
+
+def _apply_auxiliary_bonuses(result: dict, metadata: dict, frequency: dict, ela: dict) -> dict:
+    """Apply auxiliary signal bonuses to the final result."""
+    meta_risk = metadata.get("risk_score", 0) if metadata else 0
+    freq_risk = frequency.get("risk_score", 0) if frequency else 0
+    ela_risk = ela.get("risk_score", 0) if ela else 0
+    
+    # average auxiliary risk
+    aux_avg = (meta_risk + freq_risk + ela_risk) / 3
+    result["auxiliary_risk_score"] = round(aux_avg, 2)
+    
+    # If auxiliary risks are very high, add a warning flag
+    if any(r > 80 for r in [meta_risk, freq_risk, ela_risk]):
+        result["high_aux_risk_detected"] = True
+        if result["final_label"] == "Inconclusive":
+            result["final_label"] = "Partially AI Generated"
+            
+    return result
