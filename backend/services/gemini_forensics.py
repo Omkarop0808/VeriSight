@@ -16,7 +16,7 @@ load_dotenv()
 # ─── Client State ────────────────────────────────────────────
 _client = None
 _configured = False
-MODEL_ID = "gemini-2.0-flash"  # Stable model for forensic analysis
+MODEL_ID = "gemini-2.5-pro"  # Latest stable pro model for free tier (March 2026)
 
 
 def configure_gemini(api_key: str = None):
@@ -38,12 +38,19 @@ def configure_gemini(api_key: str = None):
 
 
 # ─── Forensic Prompt ─────────────────────────────────────────
-FORENSIC_PROMPT = """You are DeepSight AI, an expert digital forensics analyst specializing in detecting AI-generated and deepfake images. Analyze this image thoroughly and provide a structured forensic report.
+FORENSIC_PROMPT = """You are VeriSight AI, an expert digital forensics analyst specializing in detecting AI-generated and deepfake images. Analyze this image thoroughly and provide a structured forensic report.
 
 ANALYSIS INSTRUCTIONS:
-Examine the image for artifacts and inconsistencies that indicate AI generation. Score each category from 0-100 (0 = no artifacts detected, 100 = obvious AI artifacts).
+Examine the image for artifacts and inconsistencies that indicate AI generation. Look closely for artifacts typical of state-of-the-art generators (e.g., FLUX, Midjourney V6, DALL-E 3). Score each category from 0-100 (0 = no artifacts detected, 100 = obvious AI artifacts).
 
-RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no extra text, ONLY valid JSON):
+CRITICAL ANATOMY & SKELETAL CHECK (MANDATORY):
+You MUST rigorously scrutinize all human anatomy subject-by-subject:
+1. Count EVERY hand, EVERY arm, and EVERY leg. If there are 3 arms in the image, or a hand with 6 fingers, it is 100% FAKE.
+2. SKELETAL CONSISTENCY: Look for "ghost hands" or limbs resting on shoulders/backs that do not belong to a visible body. This is a primary indicator of "half real / half fake" compositions.
+3. JOINT PHYSICS: Check for impossible bone bends or joints that merge into the background or clothing (melting artifacts).
+4. If ANY such structural mutation is detected, the overall_verdict MUST be "Fake" with 0.95+ confidence, regardless of how photorealistic the skin textures appear. High-quality generators often hide these "mutations" in plain sight.
+
+RESPOND IN EXACTLY THIS JSON FORMAT (no markdown code blocks like ```json, no extra text, ONLY valid JSON starting with { and ending with }):
 {
     "overall_verdict": "Real" or "Fake",
     "confidence": 0.0 to 1.0,
@@ -67,7 +74,7 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no extra text, ONLY valid JSON
         {
             "category": "Anatomy & Proportions",
             "score": 0-100,
-            "description": "Anatomical findings if humans/animals present (fingers, ears, eyes, teeth, hair, body proportions)",
+            "description": "Anatomical findings. REQUIRED: explicitly state finger/hand/limb counts. Describe any impossible joints or floating appendages here.",
             "severity": "low/medium/high/critical",
             "regions": "Where in the image these artifacts appear"
         },
@@ -93,18 +100,15 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown, no extra text, ONLY valid JSON
             "regions": "Where in the image these artifacts appear"
         }
     ],
-    "detailed_analysis": "Comprehensive 4-6 sentence technical analysis covering ALL categories, noting patterns typical of specific AI generators",
+    "detailed_analysis": "Comprehensive 4-6 sentence technical analysis covering ALL categories, noting patterns typical of specific AI generators. Explicitly mention anatomy validation.",
     "recommendation": "What further steps a forensic analyst should take"
 }
 
 IMPORTANT:
-- Be thorough but fair — not all images with minor artifacts are fake
-- Real photos can have compression artifacts, lens distortion, noise, etc.
-- Focus on AI-SPECIFIC artifacts, not general image quality issues
-- If the image appears genuinely real with no AI indicators, say so confidently
-- Consider the overall coherence: does the image look like a natural photograph?
-- Try to identify which AI generator may have created it based on artifact patterns
-- Return ONLY valid JSON, no markdown code blocks"""
+- Be thorough but fair -- not all images with minor artifacts are fake.
+- If an obvious physiological/anatomical error is found (like an extra hand), the overall_verdict MUST BE "Fake".
+- Focus on AI-SPECIFIC artifacts, not general image quality issues.
+- Return ONLY valid JSON, no markdown code blocks."""
 
 
 async def analyze_image_forensically(image: Image.Image) -> Optional[dict]:
@@ -166,18 +170,18 @@ async def analyze_image_forensically(image: Image.Image) -> Optional[dict]:
             print(f"   Raw response: {response.text[:300]}...")
         except Exception:
             pass
-        return _generate_fallback_analysis()
+        return _generate_fallback_analysis(reason=f"Failed to parse Gemini JSON output. Underlying error: {str(e)}")
     except Exception as e:
         print(f"⚠️ Gemini analysis error: {e}")
-        return _generate_fallback_analysis()
+        return _generate_fallback_analysis(reason=f"Gemini API Error: {str(e)}")
 
 
-def _generate_fallback_analysis() -> dict:
+def _generate_fallback_analysis(reason: str = "Gemini forensic analysis unavailable. Set GEMINI_API_KEY in .env.") -> dict:
     """Generate a fallback analysis when Gemini is unavailable."""
     return {
         "overall_verdict": "Unknown",
         "confidence": 0.0,
-        "explanation": "Gemini forensic analysis unavailable. Only ML classification results are shown. Set GEMINI_API_KEY in .env to enable deep forensic analysis.",
+        "explanation": reason,
         "probable_generator": "Unknown",
         "artifacts": [
             {"category": "Texture Analysis", "score": 0, "description": "Analysis unavailable — enable Gemini API", "severity": "low", "regions": "N/A"},

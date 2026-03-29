@@ -1,4 +1,4 @@
-# 🛡️ DeepSight AI v2.0 — AI-Generated Image & Deepfake Forensic Platform
+#🚀 You can now run VeriSight AI: v2.0 — AI-Generated Image & Deepfake Forensic Platform
 
 > **5-Engine Forensic Analysis Pipeline** — Combining a 400K-trained ConvNeXtV2 model with Gemini Vision AI, Metadata Analysis, FFT Spectral Analysis, and Error Level Analysis for the most accurate, explainable deepfake detection.
 
@@ -118,7 +118,7 @@ python -m backend.main
 ## 📁 Project Structure
 
 ```
-DeepSight-AI/
+VeriSight-AI/
 ├── app.py                              # Streamlit frontend (v2.0)
 ├── download_checkpoint.py              # One-click checkpoint download
 ├── backend/

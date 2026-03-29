@@ -12,45 +12,37 @@ Combines:
 def combine_verdicts(
     ml_result: dict,
     gemini_result: dict = None,
+    vit_result: dict = None,
     metadata_result: dict = None,
     frequency_result: dict = None,
     ela_result: dict = None,
 ) -> dict:
     """
     Combine all analysis results into a final verdict.
-
-    Uses weighted averaging with agreement bonuses:
-    - ML model gets 60% weight (trained on 400K images, reliable)
-    - Gemini gets 40% weight (contextual forensic analysis)
-    - Metadata/Frequency/ELA provide bonus confidence modifiers
-    - If both engines agree: +10% confidence bonus
-    - If they disagree: use artifact scores to break tie
-
-    Args:
-        ml_result: dict from classifier.classify_image()
-        gemini_result: dict from gemini_forensics.analyze_image_forensically()
-        metadata_result: dict from metadata_analyzer.analyze_metadata()
-        frequency_result: dict from frequency_analyzer.analyze_frequency()
-        ela_result: dict from ela_analyzer.analyze_ela()
-
-    Returns:
-        dict with final_label, final_confidence, agreement, risk_level, details
+    Tri-Engine Ensemble:
+    - Engine 1: ConvNeXtV2 (Texture Focus) - 35% weight
+    - Engine 2: Gemini Flash (Anatomy Focus) - 30% weight
+    - Engine 3: Vision Transformer (Context/Anomaly Focus) - 35% weight
     """
-    ml_fake_prob = ml_result["fake_probability"]
-    ml_label = ml_result["label"]
+    ml_fake_prob = ml_result.get("fake_probability", 0.0)
+    ml_label = ml_result.get("label", "Real")
+    
+    vit_fake_prob = vit_result.get("fake_probability", ml_fake_prob) if vit_result else ml_fake_prob
 
-    # ─── ML-Only Mode ────────────────────────────────────
+    # ─── Fallback Mode (If Gemini Fails) ────────────────────────────────────
     if gemini_result is None or gemini_result.get("confidence", 0) == 0:
+        combined_fake_prob = (ml_fake_prob * 0.50) + (vit_fake_prob * 0.50)
         base_result = {
-            "final_label": ml_label,
-            "final_confidence": round(ml_result["confidence"], 4),
-            "ml_weight": 1.0,
+            "final_label": "Fake" if combined_fake_prob > 0.5 else "Real",
+            "final_confidence": round(combined_fake_prob if combined_fake_prob > 0.5 else (1 - combined_fake_prob), 4),
+            "ml_weight": 0.50,
             "gemini_weight": 0.0,
-            "agreement": True,
-            "risk_level": _get_risk_level(ml_fake_prob),
-            "analysis_engines": ["ConvNeXtV2"],
+            "vit_weight": 0.50,
+            "agreement": (ml_fake_prob > 0.5) == (vit_fake_prob > 0.5),
+            "risk_level": _get_risk_level(combined_fake_prob),
+            "analysis_engines": ["ConvNeXtV2", "ViT"] if vit_result else ["ConvNeXtV2"],
         }
-        # Apply auxiliary signal bonuses even in ML-only mode
+        # Apply auxiliary signal bonuses
         base_result = _apply_auxiliary_bonuses(base_result, metadata_result, frequency_result, ela_result)
         return base_result
 
@@ -58,51 +50,67 @@ def combine_verdicts(
     gemini_verdict = gemini_result.get("overall_verdict", "Unknown")
     gemini_confidence = gemini_result.get("confidence", 0.5)
 
-    # Convert Gemini verdict to fake probability
     if gemini_verdict.lower() == "fake":
         gemini_fake_prob = gemini_confidence
     elif gemini_verdict.lower() == "real":
         gemini_fake_prob = 1.0 - gemini_confidence
     else:
-        gemini_fake_prob = 0.5  # Unknown — neutral
+        gemini_fake_prob = 0.5
 
-    # ─── Weighted Combination ────────────────────────────
-    ml_weight = 0.60
-    gemini_weight = 0.40
+    # ─── Tri-Engine Weighted Combination ─────────────────
+    ml_weight = 0.35
+    vit_weight = 0.35
+    gemini_weight = 0.30
 
-    combined_fake_prob = (ml_fake_prob * ml_weight) + (gemini_fake_prob * gemini_weight)
+    combined_fake_prob = (ml_fake_prob * ml_weight) + (vit_fake_prob * vit_weight) + (gemini_fake_prob * gemini_weight)
 
     # ─── Agreement Analysis ──────────────────────────────
-    ml_says_fake = ml_label == "Fake"
-    gemini_says_fake = gemini_verdict.lower() == "fake"
-    agreement = ml_says_fake == gemini_says_fake
-
-    if agreement:
-        # Both agree — boost confidence
-        combined_fake_prob = min(1.0, combined_fake_prob * 1.10)
+    ml_says_fake = ml_fake_prob > 0.5
+    vit_says_fake = vit_fake_prob > 0.5
+    gemini_says_fake = gemini_fake_prob > 0.5
+    
+    engines_say_fake = sum([ml_says_fake, vit_says_fake, gemini_says_fake])
+    
+    if engines_say_fake >= 2:
+        # Majority agree it's fake
+        combined_fake_prob = max(combined_fake_prob, 0.65)
+    elif engines_say_fake == 0:
+        # All agree real
+        combined_fake_prob = min(combined_fake_prob, 0.35)
     else:
-        # Disagree — use artifact scores to break tie
+        # 1 says fake, 2 say real. Check Gemini Artifacts to break tie
         artifact_avg = _get_artifact_average(gemini_result.get("artifacts", []))
-        if artifact_avg > 50:
-            combined_fake_prob = max(combined_fake_prob, 0.60)
-        elif artifact_avg < 20:
-            combined_fake_prob = min(combined_fake_prob, 0.45)
-        else:
-            combined_fake_prob = min(combined_fake_prob, 0.50)
+        if artifact_avg > 60:
+             combined_fake_prob = max(combined_fake_prob, 0.55) # Gemini spotted critical artifact
 
-    # ─── Final Verdict ───────────────────────────────────
-    final_label = "Fake" if combined_fake_prob > 0.5 else "Real"
-    final_confidence = combined_fake_prob if final_label == "Fake" else (1 - combined_fake_prob)
+    # ─── Anatomy Override (User request: catch extra hands) ─────────
+    # If Gemini is extremely confident about an anatomy error, override weights
+    anatomy_score = next((a.get("score", 0) for a in gemini_result.get("artifacts", []) if a.get("category") == "Anatomy & Proportions"), 0)
+    if anatomy_score >= 90:
+         # Force fake probability higher if blatant anatomy error exists
+         combined_fake_prob = max(combined_fake_prob, 0.85)
+         gemini_weight = 0.80 # Temporarily boost gemini's influence
+
+    # ─── Final Verdict Logic ────────────────────────────
+    if combined_fake_prob >= 0.70:
+        final_label = "Fake"
+    elif combined_fake_prob >= 0.40:
+        final_label = "Potential Fake"
+    else:
+        final_label = "Real"
+
+    final_confidence = combined_fake_prob if combined_fake_prob >= 0.40 else (1 - combined_fake_prob)
 
     result = {
         "final_label": final_label,
         "final_confidence": round(final_confidence, 4),
         "combined_fake_probability": round(combined_fake_prob, 4),
         "ml_weight": ml_weight,
+        "vit_weight": vit_weight,
         "gemini_weight": gemini_weight,
-        "agreement": agreement,
+        "agreement": engines_say_fake in [0, 3], # Absolute agreement
         "risk_level": _get_risk_level(combined_fake_prob),
-        "analysis_engines": ["ConvNeXtV2", "Gemini"],
+        "analysis_engines": ["ConvNeXtV2", "ViT", "Gemini"],
         "probable_generator": gemini_result.get("probable_generator", "Unknown"),
     }
 
@@ -152,9 +160,11 @@ def _apply_auxiliary_bonuses(
         if avg_aux > 60 and result["final_label"] == "Fake":
             boost = min(0.05, (avg_aux - 60) / 800)
             result["final_confidence"] = round(min(0.99, current_confidence + boost), 4)
+            result["combined_fake_probability"] = result["final_confidence"]
         elif avg_aux < 20 and result["final_label"] == "Real":
             boost = min(0.05, (20 - avg_aux) / 800)
             result["final_confidence"] = round(min(0.99, current_confidence + boost), 4)
+            result["combined_fake_probability"] = round(1.0 - result["final_confidence"], 4)
 
     result["auxiliary_analysis"] = auxiliary_details
     return result

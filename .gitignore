@@ -1,23 +1,40 @@
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Secret files
 .env
-checkpoints/*.pth
-backend/checkpoints/*.pth
+.env.*
+!.env.example
+
+# Local models/checkpoints
+checkpoints/
+backend/checkpoints/
+models/
 *.pth
-uploads/
-reports/
-.streamlit/
+*.h5
+*.bin
+*.model
+*.weights
+
+# External dependencies
+node_modules/
 venv/
 .venv/
 env/
-node_modules/
-*.egg-info/
-dist/
-build/
-.pytest_cache/
-.mypy_cache/
-*.log
+
+# OS specific files
 .DS_Store
 Thumbs.db
+
+# Project-specific exclusions
+uploads/
+reports/
+.streamlit/
 AI Images Detector/
+sample_images/
+results_history.json
+history/
+temp/

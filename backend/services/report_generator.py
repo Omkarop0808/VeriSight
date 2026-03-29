@@ -11,20 +11,65 @@ Generates downloadable PDF reports with:
 """
 import io
 import base64
+import json
 import datetime
+import importlib
 from PIL import Image
 from fpdf import FPDF
 
 
+def clean_text(text):
+    """Ensure text is a string and handle basic cleaning without stripping Unicode/Emoji."""
+    if not isinstance(text, str):
+        return str(text)
+    
+    # We still keep common replacements for semantic clarity in some contexts,
+    # but the font will handle the rendering.
+    replacements = {
+        "🟡": "🟡", "🔴": "🔴", "🔵": "🔵", "🟢": "🟢",
+        "✓": "✓", "✗": "✗", "🎯": "🎯", "🧠": "🧠",
+        "🔬": "🔬", "🔮": "🔮", "📊": "📊", "📋": "📋",
+        "🛡️": "🛡️"
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    
+    return text  # No longer encode to ASCII!
+
+
 class ForensicReport(FPDF):
     """Custom PDF class with header/footer."""
+    
+    def cell(self, *args, **kwargs):
+        """Override cell to ensure all text is cleaned."""
+        if 'txt' in kwargs:
+            kwargs['txt'] = clean_text(kwargs['txt'])
+        elif 'text' in kwargs:
+            kwargs['text'] = clean_text(kwargs['text'])
+        elif len(args) >= 3 and isinstance(args[2], str):
+            args = list(args)
+            args[2] = clean_text(args[2])
+            args = tuple(args)
+        super().cell(*args, **kwargs)
+
+    def multi_cell(self, *args, **kwargs):
+        """Override multi_cell to ensure all text is cleaned."""
+        if 'txt' in kwargs:
+            kwargs['txt'] = clean_text(kwargs['txt'])
+        elif 'text' in kwargs:
+            kwargs['text'] = clean_text(kwargs['text'])
+        elif len(args) >= 3 and isinstance(args[2], str):
+            args = list(args)
+            args[2] = clean_text(args[2])
+            args = tuple(args)
+        super().multi_cell(*args, **kwargs)
 
     def header(self):
         self.set_fill_color(10, 10, 26)
         self.rect(0, 0, 210, 297, 'F')
         self.set_font("Helvetica", "B", 20)
         self.set_text_color(0, 212, 255)
-        self.cell(0, 15, "DeepSight AI", align="C", new_x="LMARGIN", new_y="NEXT")
+        self.cell(0, 15, "VeriSight AI", align="C", new_x="LMARGIN", new_y="NEXT")
         self.set_font("Helvetica", "", 10)
         self.set_text_color(136, 146, 176)
         self.cell(0, 6, "AI-Generated Image Forensic Analysis Report", align="C", new_x="LMARGIN", new_y="NEXT")
@@ -39,7 +84,7 @@ class ForensicReport(FPDF):
         self.set_y(-20)
         self.set_font("Helvetica", "I", 8)
         self.set_text_color(74, 85, 104)
-        self.cell(0, 10, f"DeepSight AI Report | Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}/{{nb}}", align="C")
+        self.cell(0, 10, f"VeriSight AI Report | Generated {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | Page {self.page_no()}/{{nb}}", align="C")
 
 
 def generate_report(
@@ -61,12 +106,25 @@ def generate_report(
         bytes of the PDF file
     """
     pdf = ForensicReport()
+    # ─── Register Unicode Fonts ──────────────────────────
+    import os
+    font_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "fonts")
+    
+    # Use DejaVuSans for Unicode support
+    try:
+        pdf.add_font("DejaVu", "", os.path.join(font_path, "DejaVuSans.ttf"))
+        pdf.add_font("DejaVu", "B", os.path.join(font_path, "DejaVuSans-Bold.ttf"))
+        default_font = "DejaVu"
+    except Exception as e:
+        print(f"⚠️ Font loading failed: {e}. Falling back to Helvetica.")
+        default_font = "Helvetica"
+
     pdf.alias_nb_pages()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=25)
 
     # ─── Report Info ─────────────────────────────────────
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font(default_font, "", 9)
     pdf.set_text_color(136, 146, 176)
     pdf.cell(0, 5, f"File: {filename}  |  Date: {datetime.datetime.now().strftime('%B %d, %Y at %H:%M')}  |  Processing: {processing_time}s", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(5)
@@ -84,10 +142,10 @@ def generate_report(
         pdf.set_fill_color(10, 40, 20)
         pdf.set_text_color(0, 255, 136)
 
-    pdf.set_font("Helvetica", "B", 28)
+    pdf.set_font(default_font, "B", 28)
     pdf.cell(0, 20, f"VERDICT: {verdict.upper()}", align="C", fill=True, new_x="LMARGIN", new_y="NEXT")
 
-    pdf.set_font("Helvetica", "", 14)
+    pdf.set_font(default_font, "", 14)
     pdf.set_text_color(160, 174, 192)
     pdf.cell(0, 10, f"Confidence: {confidence*100:.1f}%  |  Risk Level: {risk}", align="C", new_x="LMARGIN", new_y="NEXT")
     pdf.ln(8)
@@ -106,7 +164,7 @@ def generate_report(
 
     # ─── Engine 1: ML Classification ─────────────────────
     _add_section_header(pdf, "Engine 1: ConvNeXtV2 Classification")
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(default_font, "", 10)
     pdf.set_text_color(226, 232, 240)
     _add_detail(pdf, "Model", "ConvNeXtV2-Base (trained on 400K+ images)")
     _add_detail(pdf, "Label", ml_result.get("label", "N/A"))
@@ -123,7 +181,7 @@ def generate_report(
             heatmap_buffer = io.BytesIO(heatmap_bytes)
             pdf.image(heatmap_buffer, x=55, w=100)
             pdf.ln(3)
-            pdf.set_font("Helvetica", "I", 8)
+            pdf.set_font(default_font, "I", 8)
             pdf.set_text_color(113, 128, 150)
             pdf.cell(0, 5, "Brighter regions indicate areas the model found most suspicious", align="C", new_x="LMARGIN", new_y="NEXT")
         except Exception:
@@ -133,14 +191,14 @@ def generate_report(
     # ─── Engine 2: Gemini Forensics ──────────────────────
     if gemini_result and gemini_result.get("confidence", 0) > 0:
         _add_section_header(pdf, "Engine 2: Gemini Forensic Analysis")
-        _add_detail(pdf, "Verdict", gemini_result.get("overall_verdict", "N/A"))
+        _add_detail(pdf, "Verdict", clean_text(gemini_result.get("overall_verdict", "N/A")))
         _add_detail(pdf, "Confidence", f"{gemini_result.get('confidence', 0)*100:.1f}%")
-        _add_detail(pdf, "Probable Generator", gemini_result.get("probable_generator", "Unknown"))
+        _add_detail(pdf, "Probable Generator", clean_text(gemini_result.get("probable_generator", "Unknown")))
 
         pdf.ln(3)
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font(default_font, "I", 9)
         pdf.set_text_color(160, 174, 192)
-        explanation = gemini_result.get("explanation", "")
+        explanation = clean_text(gemini_result.get("explanation", ""))
         if explanation:
             pdf.multi_cell(0, 5, explanation)
         pdf.ln(5)
@@ -150,10 +208,10 @@ def generate_report(
         if artifacts:
             _add_section_header(pdf, "6-Category Artifact Breakdown")
             for artifact in artifacts:
-                category = artifact.get("category", "Unknown")
+                category = clean_text(artifact.get("category", "Unknown"))
                 score = artifact.get("score", 0)
-                desc = artifact.get("description", "N/A")
-                severity = artifact.get("severity", "low")
+                desc = clean_text(artifact.get("description", "N/A"))
+                severity = clean_text(artifact.get("severity", "low"))
 
                 # Color code by severity
                 if severity == "critical":
@@ -165,19 +223,19 @@ def generate_report(
                 else:
                     pdf.set_text_color(0, 255, 136)
 
-                pdf.set_font("Helvetica", "B", 10)
+                pdf.set_font(default_font, "B", 10)
                 pdf.cell(0, 6, f"{category}: {score}/100 [{severity.upper()}]", new_x="LMARGIN", new_y="NEXT")
                 pdf.set_text_color(160, 174, 192)
-                pdf.set_font("Helvetica", "", 9)
+                pdf.set_font(default_font, "", 9)
                 pdf.multi_cell(0, 5, desc)
                 pdf.ln(2)
 
         # Detailed Analysis
-        detailed = gemini_result.get("detailed_analysis", "")
+        detailed = clean_text(gemini_result.get("detailed_analysis", ""))
         if detailed:
             pdf.ln(3)
             _add_section_header(pdf, "Detailed Technical Analysis")
-            pdf.set_font("Helvetica", "", 9)
+            pdf.set_font(default_font, "", 9)
             pdf.set_text_color(160, 174, 192)
             pdf.multi_cell(0, 5, detailed)
 
@@ -192,9 +250,9 @@ def generate_report(
         _add_detail(pdf, "Capture Date", "Yes" if metadata_result.get('has_datetime') else "No")
 
         pdf.ln(3)
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font(default_font, "I", 9)
         pdf.set_text_color(160, 174, 192)
-        pdf.multi_cell(0, 5, metadata_result.get("summary", ""))
+        pdf.multi_cell(0, 5, clean_text(metadata_result.get("summary", "")))
         pdf.ln(5)
 
     # ─── Frequency Analysis ──────────────────────────────
@@ -207,9 +265,9 @@ def generate_report(
         _add_detail(pdf, "Peak Count", str(metrics.get('peak_count', 0)))
 
         pdf.ln(3)
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font(default_font, "I", 9)
         pdf.set_text_color(160, 174, 192)
-        pdf.multi_cell(0, 5, frequency_result.get("summary", ""))
+        pdf.multi_cell(0, 5, clean_text(frequency_result.get("summary", "")))
 
         # FFT Spectrum image
         spectrum_b64 = frequency_result.get("spectrum_base64")
@@ -219,7 +277,7 @@ def generate_report(
                 spec_buffer = io.BytesIO(spec_bytes)
                 pdf.image(spec_buffer, x=55, w=100)
                 pdf.ln(3)
-                pdf.set_font("Helvetica", "I", 8)
+                pdf.set_font(default_font, "I", 8)
                 pdf.set_text_color(113, 128, 150)
                 pdf.cell(0, 5, "FFT Power Spectrum (center = low frequency, edges = high frequency)", align="C", new_x="LMARGIN", new_y="NEXT")
             except Exception:
@@ -236,9 +294,9 @@ def generate_report(
         _add_detail(pdf, "Region Uniformity", f"{metrics.get('uniformity_ratio', 0):.4f}")
 
         pdf.ln(3)
-        pdf.set_font("Helvetica", "I", 9)
+        pdf.set_font(default_font, "I", 9)
         pdf.set_text_color(160, 174, 192)
-        pdf.multi_cell(0, 5, ela_result.get("summary", ""))
+        pdf.multi_cell(0, 5, clean_text(ela_result.get("summary", "")))
 
         ela_heatmap_b64 = ela_result.get("ela_heatmap_base64")
         if ela_heatmap_b64:
@@ -247,7 +305,7 @@ def generate_report(
                 ela_buffer = io.BytesIO(ela_bytes)
                 pdf.image(ela_buffer, x=55, w=100)
                 pdf.ln(3)
-                pdf.set_font("Helvetica", "I", 8)
+                pdf.set_font(default_font, "I", 8)
                 pdf.set_text_color(113, 128, 150)
                 pdf.cell(0, 5, "ELA Heatmap — brighter regions indicate compression inconsistencies", align="C", new_x="LMARGIN", new_y="NEXT")
             except Exception:
@@ -258,7 +316,7 @@ def generate_report(
     _add_section_header(pdf, "Combined Analysis Summary")
 
     agreement = combined_result.get("agreement", True)
-    pdf.set_font("Helvetica", "", 10)
+    pdf.set_font(default_font, "", 10)
     pdf.set_text_color(226, 232, 240)
     _add_detail(pdf, "Final Verdict", verdict)
     _add_detail(pdf, "Final Confidence", f"{confidence*100:.1f}%")
@@ -270,7 +328,7 @@ def generate_report(
     pdf.ln(10)
 
     # Disclaimer
-    pdf.set_font("Helvetica", "I", 8)
+    pdf.set_font(default_font, "I", 8)
     pdf.set_text_color(74, 85, 104)
     pdf.multi_cell(0, 4,
         "DISCLAIMER: This report is generated by an automated AI system and should be used as a reference tool only. "
@@ -286,7 +344,8 @@ def generate_report(
 
 def _add_section_header(pdf: FPDF, title: str):
     """Add a styled section header."""
-    pdf.set_font("Helvetica", "B", 13)
+    font_family = pdf.font_family if "DejaVu" in pdf.font_family else "Helvetica"
+    pdf.set_font(font_family, "B", 13)
     pdf.set_text_color(0, 212, 255)
     pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
     pdf.set_draw_color(0, 212, 255)
@@ -297,10 +356,11 @@ def _add_section_header(pdf: FPDF, title: str):
 
 def _add_detail(pdf: FPDF, label: str, value: str):
     """Add a key-value detail line."""
-    pdf.set_font("Helvetica", "B", 9)
+    font_family = pdf.font_family if "DejaVu" in pdf.font_family else "Helvetica"
+    pdf.set_font(font_family, "B", 9)
     pdf.set_text_color(136, 146, 176)
     x_start = pdf.get_x()
     pdf.cell(50, 5, f"{label}:")
-    pdf.set_font("Helvetica", "", 9)
+    pdf.set_font(font_family, "", 9)
     pdf.set_text_color(226, 232, 240)
     pdf.cell(0, 5, value, new_x="LMARGIN", new_y="NEXT")

@@ -41,6 +41,15 @@ def load_model(checkpoint_path: str = None):
     _model.to(_device)
     _model.eval()
     _transform = test_transforms()
+    
+    # Warm up GPU memory allocation/compilation
+    if _device.type == "cuda":
+        print("🔥 Warming up GPU inference engine...")
+        dummy_input = torch.zeros(1, 3, 256, 256).to(_device)
+        with torch.inference_mode():
+            for _ in range(3):
+                _model(dummy_input)
+
     print(f"🧠 Model loaded on {_device}")
     return _model
 
@@ -60,7 +69,17 @@ def classify_image(image: Image.Image, threshold: float = 0.50) -> dict:
     global _model, _device, _transform
 
     if _model is None:
-        raise RuntimeError("Model not loaded. Call load_model() first.")
+        # Lazy load with fallback paths
+        from backend.services.checkpoint_downloader import is_checkpoint_available
+        paths = [
+            os.path.join("backend", "checkpoints", "checkpoint_phase2.pth"),
+            os.path.join("checkpoints", "checkpoint_phase2.pth"),
+        ]
+        checkpoint = next((p for p in paths if os.path.exists(p)), None)
+        load_model(checkpoint)
+        
+    if _model is None:
+        raise RuntimeError("Model not loaded. Please ensure checkpoints are available.")
 
     # Preprocess
     img_tensor = _transform(image).unsqueeze(0).to(_device)

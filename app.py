@@ -1,5 +1,5 @@
 """
-DeepSight AI — Streamlit Frontend v2.0
+VeriSight AI — Streamlit Frontend v2.0
 Premium glassmorphism dark-theme UI for AI-generated image detection.
 Features: Dual-engine analysis, Grad-CAM, Metadata, FFT, ELA, PDF reports.
 """
@@ -16,6 +16,10 @@ import json
 import asyncio
 import numpy as np
 import requests
+from dotenv import load_dotenv
+
+# Ensure environment variables are loaded immediately for Windows users
+load_dotenv(override=True)
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,10 +35,11 @@ from backend.services.frequency_analyzer import analyze_frequency
 from backend.services.ela_analyzer import analyze_ela
 from backend.services.report_generator import generate_report
 from backend.services.checkpoint_downloader import download_checkpoint, is_checkpoint_available
+from backend.services.vit_deepfake_service import analyze_vit, load_vit_model
 
 # ─── Page Config ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="DeepSight AI — Deepfake Detector",
+    page_title="VeriSight AI — Deepfake Detector",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -47,14 +52,52 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
 
-    /* Global Styles */
+    /* Global Styles - Shadcn/Magic UI Dark Mode (Neuroblastic) */
     .stApp {
-        background: linear-gradient(135deg, #0a0a1a 0%, #0d1526 25%, #0a0f1e 50%, #0d0d25 75%, #0a0a1a 100%);
+        background: #09090b; /* Shadcn Dark */
         font-family: 'Inter', sans-serif;
+        color: #e2e8f0;
     }
 
-    /* Hide default Streamlit elements */
-    #MainMenu, footer, header {visibility: hidden;}
+    /* Override Streamlit components to match Shadcn UI */
+    .stButton > button {
+        background-color: #fafafa !important;
+        color: #18181b !important;
+        border-radius: 6px !important;
+        font-weight: 600 !important;
+        border: none !important;
+        box-shadow: 0 4px 14px 0 rgba(255, 255, 255, 0.1) !important;
+        transition: all 0.2s ease !important;
+    }
+    .stButton > button:hover {
+        background-color: #e4e4e7 !important;
+        transform: translateY(-1px) !important;
+    }
+    
+    /* Neobrutalist input fields */
+    .stTextInput > div > div > input {
+        background: transparent !important;
+        border: 1px solid rgba(255, 255, 255, 0.15) !important;
+        border-radius: 6px !important;
+        color: white !important;
+    }
+
+    /* Restoring Sidebar Toggle Visibility */
+    header[data-testid="stHeader"] {
+        visibility: visible !important;
+        background: transparent !important;
+        z-index: 999;
+    }
+    
+    /* Style the sidebar toggle button (collapsedControl) */
+    button[data-testid="base-control"] {
+        color: #00d4ff !important;
+        background: rgba(0, 212, 255, 0.1) !important;
+        border-radius: 50% !important;
+        padding: 5px !important;
+    }
+
+    #MainMenu, footer {visibility: hidden;}
     .stDeployButton {display: none;}
 
     /* Main Title */
@@ -223,10 +266,15 @@ st.markdown("""
         border: 1px solid rgba(123, 47, 247, 0.25);
     }
 
-    /* Sidebar */
+    /* Sidebar Styles */
     section[data-testid="stSidebar"] {
-        background: rgba(13, 17, 35, 0.95);
-        border-right: 1px solid rgba(255, 255, 255, 0.06);
+        background: #09090b !important; /* Match main background */
+        border-right: 1px solid rgba(255, 255, 255, 0.1) !important;
+    }
+    
+    /* Ensure the sidebar toggle icon is white/visible */
+    button[kind="header"] {
+        color: white !important;
     }
 
     /* Tabs */
@@ -422,10 +470,12 @@ if "total_real" not in st.session_state:
     st.session_state.total_real = 0
 if "total_fake" not in st.session_state:
     st.session_state.total_fake = 0
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "🏠 Dashboard"
 
 
 # ─── Hero Section ─────────────────────────────────────────────
-st.markdown('<h1 class="hero-title">🛡️ DeepSight AI</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="hero-title">🛡️ VeriSight AI</h1>', unsafe_allow_html=True)
 st.markdown("""
 <p class="hero-subtitle">
     Multi-Engine AI-Generated Image & Deepfake Forensic Platform<br>
@@ -440,6 +490,25 @@ st.markdown("""
 
 # ─── Sidebar ─────────────────────────────────────────────────
 with st.sidebar:
+    st.markdown("### 🧭 Navigation")
+    
+    # Sync radio with session state for cross-page navigation
+    page_options = ["🏠 Dashboard", "🔬 Deep Forensics Lab"]
+    try:
+        current_index = page_options.index(st.session_state.current_page)
+    except ValueError:
+        current_index = 0
+        
+    page_selection = st.radio(
+        "Go to", 
+        page_options, 
+        index=current_index,
+        label_visibility="collapsed",
+        key="nav_radio"
+    )
+    st.session_state.current_page = page_selection
+    st.divider()
+
     st.markdown("### ⚙️ Analysis Settings")
 
     threshold = st.slider(
@@ -483,22 +552,28 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🧠 About")
     st.markdown("""
-    <span class="pulse-dot"></span> **5-Engine Detection Pipeline**
+    <span class="pulse-dot"></span> **7-Signal Forensic Pipeline**
 
-    **Engine 1:** ConvNeXtV2-Base
+    **Forensic Engine 1:** ConvNeXtV2-Base
     Trained on 400K+ images — detects DALL-E3, FLUX, Midjourney, SDXL, StyleGAN2+
 
-    **Engine 2:** Gemini 2.0 Flash
-    6-category forensic analysis with AI generator identification
+    **Forensic Engine 2:** Gemini 2.5 Pro
+    Contextual reasoning, anatomical validation, and AI origin indexing
 
-    **Signal 3:** Metadata / EXIF
-    Camera info, GPS, creation tool detection, C2PA
+    **Forensic Engine 3:** Vision Transformer (ViT)
+    Deep structural anomaly mapping and contextual coherence check
 
-    **Signal 4:** FFT Spectral Analysis
-    GAN periodic pattern detection in frequency domain
+    **Forensic Signal 4:** FFT Spectral Analysis
+    Detection of periodic upscaling artifacts in the frequency domain
 
-    **Signal 5:** Error Level Analysis
-    Compression consistency and manipulation detection
+    **Forensic Signal 5:** ELA (Error Level Analysis)
+    JPEG compression layer consistency and local modification mapping
+
+    **Forensic Signal 6:** Metadata / EXIF Scan
+    Lens physics, GPS, and creation tool signature verification
+
+    **Forensic Signal 7:** Texture & Noise Profiling
+    Analysis of pixel-level noise distributions and surface smoothness
     """, unsafe_allow_html=True)
 
 
@@ -527,8 +602,13 @@ def load_image_from_url(url: str) -> Image.Image:
 
 
 # ─── Main Content ─────────────────────────────────────────────
+if st.session_state.current_page == "🔬 Deep Forensics Lab":
+    from backend.services.deep_forensics_page import render_deep_forensics_page
+    render_deep_forensics_page()
+    st.stop()
+
 tab_analyze, tab_forensics, tab_batch, tab_history = st.tabs([
-    "🔍 Analyze", "🔬 Deep Forensics", "📊 Batch Mode", "📋 History"
+    "🔍 Analyze", "🔬 Technical Details", "📊 Batch Mode", "📋 History"
 ])
 
 
@@ -544,7 +624,7 @@ with tab_analyze:
         # Input methods
         input_method = st.radio(
             "Input method",
-            ["📁 Upload File", "🌐 URL", "📋 Paste"],
+            ["📁 Upload File", "📸 Camera", "🌐 URL", "📋 Paste"],
             horizontal=True,
             label_visibility="collapsed",
         )
@@ -565,6 +645,15 @@ with tab_analyze:
                     source_name = uploaded_file.name
                 except Exception:
                     st.error("❌ Invalid image file")
+
+        elif input_method == "📸 Camera":
+            camera_file = st.camera_input("Take Live Photo", label_visibility="collapsed")
+            if camera_file is not None:
+                try:
+                    image = Image.open(camera_file).convert("RGB")
+                    source_name = "Live Camera Capture"
+                except Exception:
+                    st.error("❌ Invalid camera capture")
 
         elif input_method == "🌐 URL":
             url = st.text_input("Image URL", placeholder="https://example.com/image.jpg")
@@ -628,6 +717,14 @@ with tab_analyze:
                         gemini_result = asyncio.run(analyze_image_forensically(image))
                     except Exception as e:
                         st.warning(f"Gemini unavailable: {e}")
+                        
+            # ─── Engine 3: Vision Transformer ─────────
+            vit_result = None
+            with st.spinner("👁️ Engine 3: ViT deepfake analysis..."):
+                try:
+                    vit_result = analyze_vit(image)
+                except Exception as e:
+                    st.warning(f"ViT unavailable: {e}")
 
             # ─── Signal 3: Metadata ───────────────────
             metadata_result = None
@@ -638,6 +735,9 @@ with tab_analyze:
                         if input_method == "📁 Upload File" and uploaded_file:
                             uploaded_file.seek(0)
                             raw_bytes = uploaded_file.read()
+                        elif input_method == "📸 Camera" and camera_file:
+                            camera_file.seek(0)
+                            raw_bytes = camera_file.read()
                         metadata_result = analyze_metadata(image, raw_bytes)
                     except Exception as e:
                         st.warning(f"Metadata analysis failed: {e}")
@@ -661,7 +761,7 @@ with tab_analyze:
                         st.warning(f"ELA failed: {e}")
 
             # ─── Combine Verdicts ─────────────────────
-            combined = combine_verdicts(ml_result, gemini_result, metadata_result, frequency_result, ela_result)
+            combined = combine_verdicts(ml_result, gemini_result, vit_result, metadata_result, frequency_result, ela_result)
             processing_time = round(time.time() - start_time, 2)
 
             # Update stats
@@ -675,6 +775,7 @@ with tab_analyze:
                 "image": image,
                 "ml_result": ml_result,
                 "gemini_result": gemini_result,
+                "vit_result": vit_result,
                 "metadata_result": metadata_result,
                 "frequency_result": frequency_result,
                 "ela_result": ela_result,
@@ -685,20 +786,47 @@ with tab_analyze:
                 "source_name": source_name,
             }
 
-            # ─── Display Verdict ──────────────────────
-            verdict_class = "verdict-fake" if combined["final_label"] == "Fake" else "verdict-real"
-            verdict_emoji = "❌" if combined["final_label"] == "Fake" else "✅"
+            # ─── Display Turnitin-Style Verdict ──────────────────────
+            # Calculate total AI probability percentage
+            fake_prob_pct = int(combined.get("combined_fake_probability", combined["final_confidence"] if combined["final_label"] == "Fake" else (1-combined["final_confidence"])) * 100)
+            
+            if fake_prob_pct >= 70:
+                color = "#ff3b30"
+                idx_label = "AI-Generated"
+                idx_desc = "Highly likely generated by an AI model or deeply manipulated."
+            elif fake_prob_pct >= 40:
+                color = "#ff9500"
+                idx_label = "Suspicious"
+                idx_desc = "Contains algorithmic anomalies or significant digital alterations."
+            else:
+                color = "#00ff88"
+                idx_label = "Authentic (Real)"
+                idx_desc = "No significant AI generation signatures detected."
 
-            st.markdown(f"""
-            <div class="{verdict_class}">
-                <p class="verdict-label">{verdict_emoji} {combined["final_label"]}</p>
-                <p class="confidence-text">Confidence: {combined["final_confidence"]*100:.1f}%</p>
-                <p style="margin-top: 8px;">
-                    <span class="engine-tag engine-ml">🧠 ConvNeXtV2</span>
-                    {"<span class='engine-tag engine-gemini'>🔮 Gemini</span>" if gemini_result and gemini_result.get("confidence", 0) > 0 else ""}
-                </p>
+            prob_gen = combined.get("probable_generator", "Unknown")
+            source_text = f"<br><span style='color: #00d4ff; font-weight: 600;'>🎯 Detected Source: {prob_gen}</span>" if prob_gen and prob_gen != "Unknown" else ""
+            gemini_tag = "<span class='engine-tag engine-gemini'>🔮 Gemini</span>" if gemini_result and gemini_result.get("confidence", 0) > 0 else ""
+
+            import textwrap
+            html_content = textwrap.dedent(f"""
+            <div style="display: flex; align-items: center; background: rgba(255,255,255,0.03); padding: 24px; border-radius: 16px; border-left: 8px solid {color}; margin-bottom: 24px; box-shadow: 0 4px 24px rgba(0,0,0,0.2);">
+                <div style="min-width: 140px; text-align: center; border-right: 1px solid rgba(255,255,255,0.1); margin-right: 24px;">
+                    <h1 style="font-size: 3.8rem; font-weight: 900; margin: 0; color: {color}; line-height: 1;">{fake_prob_pct}%</h1>
+                </div>
+                <div>
+                    <h2 style="margin: 0 0 4px 0; color: #e2e8f0; font-size: 1.5rem; font-weight: 700;">AI Probability Index: {idx_label}</h2>
+                    <p style="margin: 0; color: #a0aec0; font-size: 0.95rem; line-height: 1.4;">
+                        {idx_desc}{source_text}
+                    </p>
+                    <div style="margin-top: 12px;">
+                        <span class="engine-tag engine-ml">🧠 ConvNeXtV2</span>
+                        <span class="engine-tag engine-vit" style="background: rgba(123,47,247,0.2); color: #c4b5fd; border: 1px solid rgba(123,47,247,0.4); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; margin-right: 8px;">👁️ ViT Context</span>
+                        {gemini_tag}
+                    </div>
+                </div>
             </div>
-            """, unsafe_allow_html=True)
+            """)
+            st.markdown(html_content, unsafe_allow_html=True)
 
             st.markdown("")
 
@@ -714,10 +842,53 @@ with tab_analyze:
             **Signals:** {engines_used}
             """, unsafe_allow_html=True)
 
-            # Probable generator
-            prob_gen = combined.get("probable_generator", "Unknown")
-            if prob_gen and prob_gen != "Unknown":
-                st.info(f"🎯 **Probable Generator:** {prob_gen}")
+            # Quick Navigation to Deep Forensics
+            if st.button("🔬 Open Deep Forensics Lab", use_container_width=True, type="primary"):
+                st.session_state.current_page = "🔬 Deep Forensics Lab"
+                st.rerun()
+
+            st.divider()
+
+            # ─── Multi-Signal Diagnostic Chart ─────────────────
+            st.markdown("##### 📊 Multi-Signal Diagnostic Breakdown")
+            
+            # Construct dictionary for chart
+            chart_data = {
+                "Engine / Signal": ["ConvNeXtV2 (Texture)", "Metadata Risk", "FFT Risk", "ELA Risk"],
+                "AI Risk Score": [
+                    int(ml_result["fake_probability"] * 100),
+                    metadata_result.get("risk_score", 0) if metadata_result else 0,
+                    frequency_result.get("risk_score", 0) if frequency_result else 0,
+                    ela_result.get("risk_score", 0) if ela_result else 0
+                ]
+            }
+            if gemini_result and gemini_result.get("confidence", 0) > 0:
+                chart_data["Engine / Signal"].insert(1, "Gemini (Anatomy)")
+                gemini_risk = int(gemini_result["confidence"] * 100) if gemini_result.get("overall_verdict", "").lower() == "fake" else 100 - int(gemini_result["confidence"] * 100)
+                chart_data["AI Risk Score"].insert(1, gemini_risk)
+            
+            # Map robust hex colors directly to prevent Altair condition parsing errors
+            def get_color(score):
+                if score >= 70: return "#ff3b30"
+                if score >= 40: return "#ff9500"
+                return "#00ff88"
+                
+            chart_data["BarColor"] = [get_color(s) for s in chart_data["AI Risk Score"]]
+
+            import pandas as pd
+            import altair as alt
+            
+            df_chart = pd.DataFrame(chart_data)
+            
+            # Use Altair for a beautiful horizontal bar chart
+            chart = alt.Chart(df_chart).mark_bar(cornerRadiusEnd=4).encode(
+                x=alt.X('AI Risk Score:Q', scale=alt.Scale(domain=[0, 100]), title='Fake Probability / Risk (%)'),
+                y=alt.Y('Engine / Signal:N', sort='-x', title=''),
+                color=alt.Color('BarColor:N', scale=None),
+                tooltip=['Engine / Signal', 'AI Risk Score']
+            ).properties(height=250)
+            
+            st.altair_chart(chart, use_container_width=True)
 
             st.divider()
 
@@ -739,7 +910,8 @@ with tab_analyze:
                     st.caption(gemini_result.get("explanation", ""))
                 else:
                     st.markdown("##### 🔮 Engine 2: Gemini Forensics")
-                    st.info("Set Gemini API key in sidebar to enable")
+                    err_msg = gemini_result.get("explanation", "Set Gemini API key in sidebar or .env to enable") if gemini_result else "Set Gemini API key in sidebar to enable"
+                    st.info(err_msg)
 
             st.divider()
 
@@ -844,7 +1016,7 @@ with tab_analyze:
                 st.download_button(
                     "📥 Download PDF Forensic Report",
                     data=pdf_bytes,
-                    file_name=f"DeepSight_Report_{source_name}.pdf",
+                    file_name=f"VeriSight_Report_{source_name}.pdf",
                     mime="application/pdf",
                     use_container_width=True,
                 )
@@ -873,6 +1045,12 @@ with tab_analyze:
                 </p>
             </div>
             """, unsafe_allow_html=True)
+
+            st.info("💡 **Tip:** Use the sidebar on the left to access the **Deep Forensics Lab**, adjust detection thresholds, or configure your Gemini API Key. Click the **>** icon in the top left if the sidebar is hidden.")
+            
+            if st.button("🔬 Go to Deep Forensics Lab Directly", use_container_width=True):
+                st.session_state.current_page = "🔬 Deep Forensics Lab"
+                st.rerun()
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1102,7 +1280,7 @@ with tab_history:
             st.download_button(
                 "📥 Export History (JSON)",
                 data=history_json,
-                file_name="deepsight_history.json",
+                file_name="verisight_history.json",
                 mime="application/json",
                 use_container_width=True,
             )
@@ -1113,8 +1291,8 @@ with tab_history:
 # ─── Footer ──────────────────────────────────────────────────
 st.markdown("""
 <div class="powered-by">
-    🛡️ <strong>DeepSight AI v2.0</strong> — Built for Smart India Hackathon 2025<br>
-    5-Engine Pipeline: ConvNeXtV2 (400K images) + Gemini 2.0 Flash + Metadata + FFT + ELA + Grad-CAM<br>
-    Problem Statement 7: Image Classification & Artifact Identification for AI-Generated Images
+    🛡️ <strong>VeriSight AI v2.0</strong> — Enterprise-grade Forensic Platform<br>
+    5-Engine Pipeline: ConvNeXtV2 (400K images) + Gemini 3.1 Flash + Metadata + FFT + ELA + Grad-CAM<br>
+    Detecting AI-Generated Images & Identifying Deepfake Artifacts.
 </div>
 """, unsafe_allow_html=True)

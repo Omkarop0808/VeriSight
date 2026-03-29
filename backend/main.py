@@ -1,5 +1,5 @@
 """
-DeepSight AI — FastAPI Backend Server
+VeriSight AI — FastAPI Backend Server
 Dual-engine AI-generated image & deepfake detector with full forensic analysis.
 """
 import os
@@ -61,17 +61,17 @@ async def lifespan(app: FastAPI):
 
     load_model(checkpoint)
     configure_gemini()
-    print("🛡️ DeepSight AI server ready!")
+    print("🛡️ VeriSight AI server ready!")
 
     yield  # App is running
 
     # ── Shutdown ──
-    print("🛡️ DeepSight AI server shutting down...")
+    print("🛡️ VeriSight AI server shutting down...")
 
 
 # ─── App Setup ───────────────────────────────────────────────
 app = FastAPI(
-    title="DeepSight AI",
+    title="VeriSight AI",
     description="Dual-engine AI-generated image & deepfake detector with full forensic analysis",
     version="2.0.0",
     lifespan=lifespan,
@@ -90,7 +90,7 @@ app.add_middleware(
 @app.get("/")
 async def root():
     return {
-        "message": "🛡️ DeepSight AI — Dual-Engine Deepfake Detector",
+        "message": "🛡️ VeriSight AI — Dual-Engine Deepfake Detector",
         "version": "2.0.0",
         "status": "running",
         "engines": ["ConvNeXtV2 (ML)", "Gemini 3.1 Flash (LLM)", "Metadata", "FFT", "ELA"],
@@ -299,7 +299,7 @@ async def generate_pdf_report(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=DeepSight_Report_{file.filename}.pdf"}
+        headers={"Content-Disposition": f"attachment; filename=VeriSight_Report_{file.filename}.pdf"}
     )
 
 

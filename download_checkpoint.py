@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DeepSight AI — Checkpoint Downloader
+VeriSight AI — Checkpoint Downloader
 Run this once to download the pre-trained ConvNeXtV2 model weights.
 
 Usage:
@@ -11,7 +11,7 @@ import sys
 
 def main():
     print("=" * 60)
-    print("🛡️  DeepSight AI — Checkpoint Downloader")
+    print("🛡️  VeriSight AI — Checkpoint Downloader")
     print("=" * 60)
     print()
 
@@ -77,7 +77,7 @@ def main():
         sys.exit(1)
 
     print()
-    print("🚀 You can now run DeepSight AI:")
+    print("🚀 You can now run VeriSight AI:")
     print("   streamlit run app.py")
 
 
