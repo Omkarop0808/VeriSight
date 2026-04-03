@@ -18,6 +18,14 @@ import numpy as np
 import requests
 from dotenv import load_dotenv
 
+# ─── Page Config ─────────────────────────────────────────────
+st.set_page_config(
+    page_title="VeriSight AI — Deepfake Detector",
+    page_icon="🛡️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 # Ensure environment variables are loaded immediately for Windows users
 load_dotenv(override=True)
 
@@ -41,14 +49,6 @@ from backend.services.checkpoint_downloader import download_checkpoint, is_check
 from backend.services.vit_service import analyze_vit_regional as analyze_vit, load_vit_model
 from backend.services.anatomy_analyzer import analyze_anatomy
 from backend.services.regional_analyzer import analyze_regional_inconsistency as analyze_regional
-
-# ─── Page Config ─────────────────────────────────────────────
-st.set_page_config(
-    page_title="VeriSight AI — Deepfake Detector",
-    page_icon="🛡️",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 # ─── Custom CSS ──────────────────────────────────────────────
 st.markdown("""
@@ -442,31 +442,36 @@ st.markdown("""
 @st.cache_resource
 def init_model():
     """Load model on first run, auto-download checkpoint if needed."""
-    # Auto-download checkpoint if not present
-    if not is_checkpoint_available():
-        with st.spinner("📥 Downloading ConvNeXtV2 checkpoint (one-time, ~700MB)..."):
-            download_checkpoint()
+    try:
+        # Auto-download checkpoint if not present
+        if not is_checkpoint_available():
+            with st.spinner("📥 Downloading ConvNeXtV2 checkpoint (one-time, ~700MB)..."):
+                download_checkpoint()
+    
+        paths = [
+            os.path.join("backend", "checkpoints", "checkpoint_phase2.pth"),
+            os.path.join("checkpoints", "checkpoint_phase2.pth"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "AI-Generated-Deepfake-Image-Detector",
+                         "AI Images Detector", "checkpoints", "checkpoint_phase2.pth"),
+        ]
+    
+        checkpoint = None
+        for p in paths:
+            if os.path.exists(p):
+                checkpoint = p
+                break
+    
+        model = load_model(checkpoint)
+        configure_gemini()
+        return model
+    except Exception as e:
+        st.error(f"⚠️ Model Initialization Failed: {str(e)}")
+        # Return a sentinel or allow the app to continue for non-ML features
+        return None
 
-    paths = [
-        os.path.join("backend", "checkpoints", "checkpoint_phase2.pth"),
-        os.path.join("checkpoints", "checkpoint_phase2.pth"),
-        os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                     "..", "AI-Generated-Deepfake-Image-Detector",
-                     "AI Images Detector", "checkpoints", "checkpoint_phase2.pth"),
-    ]
-
-    checkpoint = None
-    for p in paths:
-        if os.path.exists(p):
-            checkpoint = p
-            break
-
-    model = load_model(checkpoint)
-    configure_gemini()
-    return model
-
-
-init_model()
+# Try to initialize model, but don't crash the whole app if it fails on boot
+model = init_model()
 
 # ─── Session State ────────────────────────────────────────────
 if "history" not in st.session_state:
