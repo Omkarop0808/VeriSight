@@ -14,6 +14,7 @@ import time
 import base64
 import json
 import asyncio
+import gc
 import numpy as np
 import requests
 from dotenv import load_dotenv
@@ -35,10 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend.models.convnext import build_model
 from backend.transforms import test_transforms
 from backend.services.gradcam_service import generate_heatmap
-from backend.services.gemini_forensics import configure_gemini, analyze_image_forensically, generate_expert_summary
-
-# Initialize Gemini with the latest key from .env
-configure_gemini()
+# Gemini initialization is now done lazily within init_model() or as needed
 from backend.services.score_combiner import combine_verdicts
 from backend.services.classifier import load_model, classify_image, get_model_for_gradcam
 from backend.services.metadata_analyzer import analyze_metadata
@@ -438,40 +436,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ─── Initialize Model ────────────────────────────────────────
-@st.cache_resource
-def init_model():
-    """Load model on first run, auto-download checkpoint if needed."""
-    try:
-        # Auto-download checkpoint if not present
-        if not is_checkpoint_available():
-            with st.spinner("📥 Downloading ConvNeXtV2 checkpoint (one-time, ~700MB)..."):
-                download_checkpoint()
-    
-        paths = [
-            os.path.join("backend", "checkpoints", "checkpoint_phase2.pth"),
-            os.path.join("checkpoints", "checkpoint_phase2.pth"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "AI-Generated-Deepfake-Image-Detector",
-                         "AI Images Detector", "checkpoints", "checkpoint_phase2.pth"),
-        ]
-    
-        checkpoint = None
-        for p in paths:
-            if os.path.exists(p):
-                checkpoint = p
-                break
-    
-        model = load_model(checkpoint)
-        configure_gemini()
-        return model
-    except Exception as e:
-        st.error(f"⚠️ Model Initialization Failed: {str(e)}")
-        # Return a sentinel or allow the app to continue for non-ML features
-        return None
-
-# Try to initialize model, but don't crash the whole app if it fails on boot
-model = init_model()
+# init_model is no longer called globally to save 700MB+ RAM during boot.
+# It is now called lazily by the classification service.
 
 # ─── Session State ────────────────────────────────────────────
 if "history" not in st.session_state:
@@ -874,6 +840,9 @@ with tab_analyze:
                     "processing_time": processing_time,
                     "source_name": source_name,
                 }
+                
+                # Force garbage collection after heavy ML inference
+                gc.collect()
 
             # ─── Display Turnitin-Style Verdict ──────────────────────
             # Calculate total AI probability percentage
