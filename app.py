@@ -821,7 +821,8 @@ with tab_analyze:
                     frequency_result, 
                     ela_result,
                     anatomy_result,
-                    regional_result
+                    regional_result,
+                    threshold
                 )
                 
                 # --- Expert Investigative Summary ---

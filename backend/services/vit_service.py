@@ -108,7 +108,7 @@ def analyze_vit_regional(image: Image.Image, grid_size: int = 4) -> dict:
 
     # Determine regional threat
     max_patch_risk = np.max(patch_probs)
-    partially_fake = max_patch_risk > 0.45 and global_fake_prob < 0.55
+    partially_fake = max_patch_risk > 0.60 and global_fake_prob < 0.55
 
     return {
         "fake_probability": round(global_fake_prob, 4),

@@ -18,6 +18,7 @@ def combine_verdicts(
     ela_result: dict = None,
     anatomy_result: dict = None,
     regional_result: dict = None,
+    user_threshold: float = 0.50,
 ) -> dict:
     """
     Combine all analysis results into a final verdict.
@@ -27,6 +28,10 @@ def combine_verdicts(
     vit_fake_prob = vit_result.get("fake_probability", ml_fake_prob) if vit_result else ml_fake_prob
     
     # ─── Parse Gemini Verdict ────────────────────────────
+    gemini_weight = 0.40
+    ml_weight = 0.30
+    vit_weight = 0.30
+    
     if gemini_result and gemini_result.get("confidence", 0) > 0:
         gemini_verdict = gemini_result.get("overall_verdict", "Unknown")
         gemini_confidence = gemini_result.get("confidence", 0.5)
@@ -37,30 +42,25 @@ def combine_verdicts(
         else:
             gemini_fake_prob = 0.5
     else:
-        gemini_fake_prob = (ml_fake_prob + vit_fake_prob) / 2
+        # If Gemini fails, don't invent a probability. Remove its weight.
+        gemini_fake_prob = 0.0
+        gemini_weight = 0.0
+        ml_weight = 0.50
+        vit_weight = 0.50
 
     # ─── Confidence-Weighted / Max-Pooling Override ───────
-    # If any engine is EXTREMELY confident (>95%), it should bias the result significantly
-    # This prevents high-confidence regional signals from being averaged into "Real"
-    
     # Standard weighted average
-    ml_weight = 0.35
-    vit_weight = 0.35
-    gemini_weight = 0.30
     weighted_avg = (ml_fake_prob * ml_weight) + (vit_fake_prob * vit_weight) + (gemini_fake_prob * gemini_weight)
     
     # Max-Pooling Override (Aggressive Forensic Bias)
-    max_conf = max(ml_fake_prob, vit_fake_prob, gemini_fake_prob)
+    max_conf = max(ml_fake_prob, vit_fake_prob, gemini_fake_prob if gemini_weight > 0 else 0)
     
     if max_conf > 0.95:
         # If any engine is extremely sure, we force the verdict to High Risk
-        combined_fake_prob = max(weighted_avg, 0.85 if max_conf > 0.98 else 0.75)
-    elif max_conf > 0.80:
+        combined_fake_prob = max(weighted_avg, 0.95 if max_conf > 0.98 else 0.85)
+    elif max_conf > 0.85:
         # Significant partial signal
-        combined_fake_prob = max(weighted_avg, 0.65)
-    elif max_conf > 0.60:
-        # Noticeable signal
-        combined_fake_prob = max(weighted_avg, 0.45)
+        combined_fake_prob = max(weighted_avg, 0.75)
     else:
         combined_fake_prob = weighted_avg
 
@@ -77,6 +77,13 @@ def combine_verdicts(
     # Identify if it is strongly likely to be a real, physical photograph
     is_strong_real_photo = has_camera_info or (has_exif and natural_noise) or is_live_camera
     
+    if natural_noise and gemini_weight == 0.0:
+        # If Gemini is offline, visual models often panic over complex organic textures (like tiger fur).
+        # If the FFT domain shows no generative grid, we crush the CNN confidence to prevent false positives.
+        ml_fake_prob *= 0.45
+        vit_fake_prob *= 0.60
+        weighted_avg = (ml_fake_prob * ml_weight) + (vit_fake_prob * vit_weight) + (gemini_fake_prob * gemini_weight)
+
     if is_live_camera:
         # Hard penalty to AI score. A live hardware feed is definitively a real physical capture.
         combined_fake_prob = min(combined_fake_prob * 0.20, 0.15)
@@ -97,9 +104,9 @@ def combine_verdicts(
     vit_partial_anomaly = vit_result.get("is_partially_fake", False) if vit_result else False
 
     # ─── Final Verdict Logic (Dynamic Thresholds) ─────────
-    # If standard threshold is 55%, a confirmed camera photo requires 75% to be declared heavily manipulated.
-    ai_threshold = 0.75 if is_strong_real_photo else 0.55
-    inconclusive_threshold = 0.55 if is_strong_real_photo else 0.35
+    # A confirmed camera photo requires exactly +0.20 above the user's threshold to trigger "AI Generated".
+    ai_threshold = min(user_threshold + 0.20, 0.95) if is_strong_real_photo else user_threshold
+    inconclusive_threshold = user_threshold if is_strong_real_photo else max(user_threshold - 0.05, 0.10)
 
     if has_anatomy_anomaly:
         final_label = "Suspicious — Anomaly Detected"

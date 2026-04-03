@@ -275,20 +275,17 @@ def render_deep_forensics_page():
     weighted_avg = expert_score
 
     
-    if weighted_avg >= 70:
-        expert_verdict = "Likely AI Generated"
+    expert_verdict = la.get("combined", {}).get("final_label", "Unknown")
+    
+    if "AI Generated" in expert_verdict:
         expert_color = "#ff3b30"
         confidence_desc = "Critical visual and mathematical evidence of synthetic generation."
-    elif weighted_avg >= 40:
-        expert_verdict = "Inconclusive / Suspicious"
+    elif "Inconclusive" in expert_verdict or "Suspicious" in expert_verdict or "Partially" in expert_verdict:
         expert_color = "#ff9500"
         confidence_desc = "Significant anomalies detected; digital manipulation or 'half-fake' inpainting is suspected."
     else:
-        expert_verdict = "Likely Real"
         expert_color = "#00ff88"
         confidence_desc = "Signals align with natural camera optics and physical light sensors."
-        
-    if anatomy_result and anatomy_result.get("is_suspicious"): expert_verdict = "Suspicious — Anomaly Detected"
     
     reasoning = []
     if ml_score > 70: reasoning.append("ConvNeXtV2 explicitly classified texture anomalies.")

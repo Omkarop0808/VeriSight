@@ -279,4 +279,8 @@ async def generate_expert_summary(signals: dict) -> str:
         )
         return response.text.strip()
     except Exception as e:
-        return f"Unable to generate expert summary: {str(e)}"
+        error_msg = str(e)
+        if "429" in error_msg or "quota" in error_msg.lower():
+            return "Expert summary unavailable: Gemini API rate limit/quota exceeded. Please wait 1 minute before analyzing another image."
+        # Keep the error message brief so it doesn't break the UI
+        return f"Unable to generate expert summary: {error_msg[:100]}..."
