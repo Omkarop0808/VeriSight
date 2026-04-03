@@ -199,7 +199,8 @@ streamlit run app.py
 
 ## 🏆 Hackathon Credits
 - **Omkar** - Lead AI/ML Engineer
-- **Jash Mohite** - Full-Stack Developer & UI Architect
+- **Jash Mohite** 
+- **Jovin Menachery** 
 - **Neural Nexus Team**
 
 ---
