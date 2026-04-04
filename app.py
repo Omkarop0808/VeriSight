@@ -507,21 +507,33 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🔑 API Configuration")
-    # Check if key is available in .env first
+    # 1. Fetch from Environment/Files (.env or Streamlit Secrets)
     env_key = os.getenv("GEMINI_API_KEY", "")
     
-    # Simple logic: use env_key if user hasn't typed anything else
-    gemini_key = st.text_input("Gemini API Key", type="password", 
-                                value=env_key if env_key else "",
-                                placeholder="Enter key for forensics",
-                                help="Get free: aistudio.google.com/apikey")
+    # 2. UI Input (Session State used to persist manual overrides)
+    if "manual_api_key" not in st.session_state:
+        st.session_state.manual_api_key = env_key
+
+    gemini_key = st.text_input(
+        "Gemini API Key", 
+        type="password", 
+        value=st.session_state.manual_api_key,
+        placeholder="Enter key for forensics",
+        help="Get free: aistudio.google.com/apikey"
+    )
     
+    # 3. Dynamic Configuration & Status
     if gemini_key:
+        st.session_state.manual_api_key = gemini_key
         configure_gemini(gemini_key)
-        if gemini_key == env_key:
+        
+        if gemini_key == env_key and env_key != "":
             st.success("✅ Gemini configured! (Using .env)")
         else:
-            st.success("✅ Gemini configured! (Manual Entry)")
+            st.success("✅ Gemini configured! (Using Manual Entry)")
+            if st.button("🔄 Reset to .env key", use_container_width=True):
+                st.session_state.manual_api_key = env_key
+                st.rerun()
     else:
         st.warning("⚠️ Enter Gemini API Key to enable Engine 2")
 
