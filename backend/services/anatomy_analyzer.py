@@ -61,6 +61,19 @@ def analyze_anatomy(image: Image.Image) -> dict:
         if results.pose_landmarks:
             landmarks = results.pose_landmarks.landmark
             
+            # SIZE FILTER: Only analyze anatomy if the "figure" is large enough to be reliable
+            # (Rough estimate: Distance from nose (0) to heels (29,30) should be > 15% of image height)
+            y_span = abs(landmarks[30].y - landmarks[0].y)
+            if y_span < 0.15: # Ignore distant tiny figures
+                return {
+                    "is_suspicious": False,
+                    "anomalies": ["People detected in distance (too small for reliable forensic anatomy). Skipping..."],
+                    "severity": "low",
+                    "flags": flags,
+                    "overlay_b64": None,
+                    "explanation": "Figures too small for reliable anatomical check."
+                }
+            
             # Count visible limbs
             if landmarks[13].visibility > 0.5 or landmarks[15].visibility > 0.5: flags["arms_count"] += 1
             if landmarks[14].visibility > 0.5 or landmarks[16].visibility > 0.5: flags["arms_count"] += 1
