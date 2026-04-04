@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from backend.models.convnext import build_model
 from backend.transforms import test_transforms
 from backend.services.gradcam_service import generate_heatmap
+from backend.services.gemini_forensics import configure_gemini, analyze_image_forensically, generate_expert_summary
 # Gemini initialization is now done lazily within init_model() or as needed
 from backend.services.score_combiner import combine_verdicts
 from backend.services.classifier import load_model, classify_image, get_model_for_gradcam
@@ -506,12 +507,23 @@ with st.sidebar:
     st.divider()
 
     st.markdown("### 🔑 API Configuration")
-    gemini_key = st.text_input("Gemini API Key", type="password",
+    # Check if key is available in .env first
+    env_key = os.getenv("GEMINI_API_KEY", "")
+    
+    # Simple logic: use env_key if user hasn't typed anything else
+    gemini_key = st.text_input("Gemini API Key", type="password", 
+                                value=env_key if env_key else "",
                                 placeholder="Enter key for forensics",
                                 help="Get free: aistudio.google.com/apikey")
+    
     if gemini_key:
         configure_gemini(gemini_key)
-        st.success("✅ Gemini configured!")
+        if gemini_key == env_key:
+            st.success("✅ Gemini configured! (Using .env)")
+        else:
+            st.success("✅ Gemini configured! (Manual Entry)")
+    else:
+        st.warning("⚠️ Enter Gemini API Key to enable Engine 2")
 
     st.divider()
 
@@ -711,6 +723,7 @@ with tab_analyze:
                 if use_gemini:
                     with st.spinner("🔮 Engine 2: Gemini forensic analysis..."):
                         try:
+                            configure_gemini() # Lazy init
                             gemini_result = asyncio.run(analyze_image_forensically(image))
                         except Exception as e:
                             st.warning(f"Gemini unavailable: {e}")
@@ -808,6 +821,7 @@ with tab_analyze:
                             "metadata_result": metadata_result,
                             "combined": combined
                         }
+                        configure_gemini() # Ensure configured for summary
                         expert_statement = asyncio.run(generate_expert_summary(signals))
                         combined["expert_statement"] = expert_statement
                     except Exception as e:
