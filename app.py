@@ -602,8 +602,8 @@ if st.session_state.current_page == "🔬 Deep Forensics Lab":
     render_deep_forensics_page()
     st.stop()
 
-tab_analyze, tab_forensics, tab_batch, tab_history = st.tabs([
-    "🔍 Analyze", "🔬 Technical Details", "📊 Batch Mode", "📋 History"
+tab_analyze, tab_pitch, tab_forensics, tab_batch, tab_history = st.tabs([
+    "🔍 Analyze", "🏆 Pitch Deck", "🔬 Technical Details", "📊 Batch Mode", "📋 History"
 ])
 
 
@@ -1373,6 +1373,31 @@ with tab_batch:
             col4.metric("⚠️ Errors", err_c)
 
             st.dataframe(results, use_container_width=True, hide_index=True)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TAB: Pitch Deck
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+with tab_pitch:
+    st.markdown('<div class="section-header">🏆 Hackathon Pitch Deck</div>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <div class="glass-card" style="padding: 10px; margin-bottom: 20px;">
+        <iframe src="https://drive.google.com/file/d/1U83PQIR-j0s9sJJR-sR0mRbqflAKBtPu/preview" 
+                width="100%" height="700" allow="autoplay" style="border-radius: 12px; border: none;"></iframe>
+    </div>
+    
+    <div style="text-align: center; margin-top: 20px;">
+        <a href="https://drive.google.com/file/d/1U83PQIR-j0s9sJJR-sR0mRbqflAKBtPu/view?usp=sharing" 
+           target="_blank" style="text-decoration: none;">
+           <button style="background: linear-gradient(135deg, #7b2ff7 0%, #00d4ff 100%); 
+                          color: white; border: none; padding: 12px 24px; border-radius: 30px; 
+                          font-weight: 600; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 15px rgba(123,47,247,0.3);">
+              📥 Download Presentation
+           </button>
+        </a>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

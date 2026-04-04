@@ -5,9 +5,9 @@ VeriSight is an advanced, high-precision ensemble platform designed to detect AI
 ---
 
 ## 🎬 Demo & Presentation
+- **[🌐 Live Application (Standard)](https://verisightapp.streamlit.app/)**
 - **[🎥 Watch Demo Video](https://drive.google.com/file/placeholder/view)**
-- **[📊 View Hackathon Presentation](https://www.canva.com/design/placeholder/edit)**
-- **[🌐 Live Application](https://verisight-ai.streamlit.app/)**
+- **[🏆 Integrated Pitch Deck ](https://drive.google.com/file/d/1U83PQIR-j0s9sJJR-sR0mRbqflAKBtPu/view?usp=sharing)**
 
 ---
 
@@ -21,8 +21,9 @@ VeriSight AI introduces a **Tri-Engine Forensic Ensemble** that marries deep lea
 
 ---
 
-## 🌟 Key Features
+- **🏆 Integrated Pitch Deck**: Project slides are embedded directly in the app dashboard for seamless hackathon pitching.
 - **🧠 Tri-Engine Neural Guard:** Simultaneously routes images through **ConvNeXtV2-Base**, **Vision Transformer (ViT)**, and **Google Gemini Pro** for multi-layered validation.
+- **⚡ Quota-Saving Engine**: Consolidated 1-call-per-image architecture that doubles forensic capacity and prevents API lockouts.
 - **🔭 Optics-Verify Safety Net:** A unique mathematical override that calculates physical lens focal-blur (Laplacian Variance) to differentiate real wildlife macros from synthetic AI generations, slashing false positives on complex nature photos by 50%.
 - **📊 FFT Spectral Analysis:** Scans for invisible "checkerboard" matrix artifacts hidden in the frequency domain of GAN and Diffusion models.
 - **🔬 Error Level Analysis (ELA):** Maps compression-layer variances to detect regional splicing or generative-fill tampering.
