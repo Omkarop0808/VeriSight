@@ -103,8 +103,14 @@ def combine_verdicts(
     has_regional_anomaly = regional_result.get("is_inconsistent", False) if regional_result else False
     vit_partial_anomaly = vit_result.get("is_partially_fake", False) if vit_result else False
 
-    # ─── Final Verdict Logic (Dynamic Thresholds) ─────────
     # A confirmed camera photo requires exactly +0.20 above the user's threshold to trigger "AI Generated".
+    # SAFETY BUFFER: If the score is in the "Low Confidence" zone (0.50 - 0.68) and we have HIGH Natural Noise, 
+    # we treat it as a False Positive from the ML models.
+    doubt_zone = (0.50 <= combined_fake_prob <= 0.68)
+    if doubt_zone and natural_noise and gemini_weight == 0.0:
+        combined_fake_prob = min(combined_fake_prob, 0.45)
+        final_label = "Likely Real (Filtered Hallucination)"
+    
     ai_threshold = min(user_threshold + 0.20, 0.95) if is_strong_real_photo else user_threshold
     inconclusive_threshold = user_threshold if is_strong_real_photo else max(user_threshold - 0.05, 0.10)
 
