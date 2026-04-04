@@ -78,10 +78,10 @@ def combine_verdicts(
     is_strong_real_photo = has_camera_info or (has_exif and natural_noise) or is_live_camera
     
     if natural_noise and gemini_weight == 0.0:
-        # If Gemini is offline, visual models often panic over complex organic textures (like tiger fur).
-        # If the FFT domain shows no generative grid, we crush the CNN confidence to prevent false positives.
-        ml_fake_prob *= 0.45
-        vit_fake_prob *= 0.60
+        # If Gemini is offline, visual models often panic over complex organic textures (like leaves/trees).
+        # We crush the CNN confidence more aggressively if the Frequency Domain shows NO AI GRID.
+        ml_fake_prob *= 0.35 # Penalize hallucination
+        vit_fake_prob *= 0.45 
         weighted_avg = (ml_fake_prob * ml_weight) + (vit_fake_prob * vit_weight) + (gemini_fake_prob * gemini_weight)
 
     if is_live_camera:

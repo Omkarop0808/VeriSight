@@ -815,6 +815,9 @@ with tab_analyze:
                 
                 if expert_statement:
                     combined["expert_statement"] = expert_statement
+                elif not gemini_result or gemini_result.get("error"):
+                    # CRITICAL: If Gemini failed the first time, skip the second call to save quota
+                    combined["expert_statement"] = "Investigative summary skipped: Primary forensic engine is offline."
                 else:
                     with st.spinner("🕵️ Finalizing expert investigative summary..."):
                         try:

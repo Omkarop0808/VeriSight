@@ -79,7 +79,7 @@ def analyze_anatomy(image: Image.Image) -> dict:
             # Check for impossible limb positioning (wrist intersecting deep torso without occlusion logic)
             # This flags "ghost hands" often spawned by AI inside the chest
             for wrist_idx in [15, 16]:
-                if landmarks[wrist_idx].visibility > 0.7:
+                if landmarks[wrist_idx].visibility > 0.85: # Increased threshold for confidence
                     wx, wy = landmarks[wrist_idx].x, landmarks[wrist_idx].y
                     # If wrist is tightly bound inside the center of torso
                     if torso_x_min + 0.1 < wx < torso_x_max - 0.1 and torso_y_min + 0.1 < wy < torso_y_max - 0.1:
