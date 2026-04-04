@@ -2,6 +2,7 @@
 torch
 torchvision
 timm
+transformers
 grad-cam
 numpy
 pillow
