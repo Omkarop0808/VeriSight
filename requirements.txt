@@ -1,9 +1,21 @@
-streamlit
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
+timm
+grad-cam
 numpy
 pillow
-matplotlib
 opencv-python-headless
-pytorch-grad-cam
-timm
+matplotlib
+requests
+python-dotenv
+fpdf2
+huggingface-hub
+scipy
+pandas
+altair
+google-genai
+python-multipart
+pydantic
+fastapi
+uvicorn

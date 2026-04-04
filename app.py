@@ -723,7 +723,7 @@ with tab_analyze:
                 if use_gemini:
                     with st.spinner("🔮 Engine 2: Gemini forensic analysis..."):
                         try:
-                            configure_gemini() # Lazy init
+                            # configure_gemini() is already called in the sidebar via gemini_key input
                             gemini_result = asyncio.run(analyze_image_forensically(image))
                         except Exception as e:
                             st.warning(f"Gemini unavailable: {e}")
@@ -810,22 +810,27 @@ with tab_analyze:
                 )
                 
                 # --- Expert Investigative Summary ---
-                with st.spinner("🕵️ Finalizing expert investigative summary..."):
-                    try:
-                        signals = {
-                            "ml_result": ml_result,
-                            "vit_result": vit_result,
-                            "gemini_result": gemini_result,
-                            "anatomy_result": anatomy_result,
-                            "regional_result": regional_result,
-                            "metadata_result": metadata_result,
-                            "combined": combined
-                        }
-                        configure_gemini() # Ensure configured for summary
-                        expert_statement = asyncio.run(generate_expert_summary(signals))
-                        combined["expert_statement"] = expert_statement
-                    except Exception as e:
-                        combined["expert_statement"] = f"Summary engine error: {str(e)}"
+                # Check if Gemini already provided a summary in the first pass to save quota
+                expert_statement = gemini_result.get("expert_investigative_summary") if gemini_result else None
+                
+                if expert_statement:
+                    combined["expert_statement"] = expert_statement
+                else:
+                    with st.spinner("🕵️ Finalizing expert investigative summary..."):
+                        try:
+                            signals = {
+                                "ml_result": ml_result,
+                                "vit_result": vit_result,
+                                "gemini_result": gemini_result,
+                                "anatomy_result": anatomy_result,
+                                "regional_result": regional_result,
+                                "metadata_result": metadata_result,
+                                "combined": combined
+                            }
+                            expert_statement = asyncio.run(generate_expert_summary(signals))
+                            combined["expert_statement"] = expert_statement
+                        except Exception as e:
+                            combined["expert_statement"] = f"Summary engine error: {str(e)}"
     
                 processing_time = round(time.time() - start_time, 2)
     

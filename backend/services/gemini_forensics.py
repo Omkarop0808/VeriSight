@@ -16,7 +16,7 @@ load_dotenv()
 # ─── Client State ────────────────────────────────────────────
 _client = None
 _configured = False
-MODEL_ID = "gemini-2.5-flash"  # Latest stable flash model for high quota (March 2026)
+MODEL_ID = "gemini-2.0-flash"  # Latest stable flash model for 2026
 
 
 def configure_gemini(api_key: str = None):
@@ -113,6 +113,7 @@ RESPOND IN EXACTLY THIS JSON FORMAT (no markdown code blocks like ```json, no ex
         }
     ],
     "detailed_analysis": "Comprehensive 4-6 sentence technical analysis covering ALL categories, noting patterns typical of specific AI generators. Explicitly mention anatomy validation.",
+    "expert_investigative_summary": "A 3-4 sentence authoritative 'Final Closing Statement' for the investigative report, synthesizing all findings into a clear verdict for an investigator.",
     "recommendation": "What further steps a forensic analyst should take"
 }
 
