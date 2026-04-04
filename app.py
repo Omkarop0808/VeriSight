@@ -510,30 +510,25 @@ with st.sidebar:
     # 1. Fetch from Environment/Files (.env or Streamlit Secrets)
     env_key = os.getenv("GEMINI_API_KEY", "")
     
-    # 2. UI Input (Session State used to persist manual overrides)
-    if "manual_api_key" not in st.session_state:
-        st.session_state.manual_api_key = env_key
-
+    # 2. UI Input (Keep empty by default to prevent 'Automatic' fetching into view)
     gemini_key = st.text_input(
         "Gemini API Key", 
         type="password", 
-        value=st.session_state.manual_api_key,
-        placeholder="Enter key for forensics",
+        value="", # Always start empty as requested
+        placeholder="Enter key to override .env",
         help="Get free: aistudio.google.com/apikey"
     )
     
-    # 3. Dynamic Configuration & Status
-    if gemini_key:
-        st.session_state.manual_api_key = gemini_key
-        configure_gemini(gemini_key)
-        
-        if gemini_key == env_key and env_key != "":
-            st.success("✅ Gemini configured! (Using .env)")
-        else:
-            st.success("✅ Gemini configured! (Using Manual Entry)")
-            if st.button("🔄 Reset to .env key", use_container_width=True):
-                st.session_state.manual_api_key = env_key
-                st.rerun()
+    # 3. Decision Logic: UI Overrides Environment
+    active_key = gemini_key if gemini_key else env_key
+    
+    if active_key:
+        configure_gemini(active_key)
+        if gemini_key:
+            st.success("✅ Gemini active (Manual Entry Override)")
+        elif env_key:
+            st.success("✅ Gemini active (Using Background .env)")
+            st.info("💡 Field is empty to keep your key private, but Engine 2 is ONLINE.")
     else:
         st.warning("⚠️ Enter Gemini API Key to enable Engine 2")
 
