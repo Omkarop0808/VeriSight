@@ -4,6 +4,7 @@ torchvision
 timm
 transformers
 grad-cam
+streamlit-paste-button
 numpy
 pillow
 opencv-python-headless
