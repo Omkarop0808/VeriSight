@@ -9,7 +9,7 @@ google-genai>=1.0.0
 grad-cam>=1.4.8
 Pillow>=11.0.0
 numpy>=1.24.0
-opencv-python-headless>=4.10.0.84
+opencv-python-headless
 python-dotenv>=1.0.1
 fpdf2>=2.8.2
 streamlit>=1.40.0
