@@ -816,31 +816,16 @@ with tab_analyze:
                     threshold
                 )
                 
-                # --- Expert Investigative Summary ---
-                # Check if Gemini already provided a summary in the first pass to save quota
-                expert_statement = gemini_result.get("expert_investigative_summary") if gemini_result else None
-                
-                if expert_statement:
-                    combined["expert_statement"] = expert_statement
-                elif not gemini_result or gemini_result.get("error"):
-                    # CRITICAL: If Gemini failed the first time, skip the second call to save quota
-                    combined["expert_statement"] = "Investigative summary skipped: Primary forensic engine is offline."
+                # --- Expert Investigative Summary (Quota Optimized) ---
+                if gemini_result and isinstance(gemini_result, dict):
+                    expert_statement = gemini_result.get("expert_investigative_summary")
+                    if not expert_statement:
+                        # Fallback if JSON was partial
+                        expert_statement = gemini_result.get("explanation", "Forensic analysis complete. Review technical signals for details.")
                 else:
-                    with st.spinner("🕵️ Finalizing expert investigative summary..."):
-                        try:
-                            signals = {
-                                "ml_result": ml_result,
-                                "vit_result": vit_result,
-                                "gemini_result": gemini_result,
-                                "anatomy_result": anatomy_result,
-                                "regional_result": regional_result,
-                                "metadata_result": metadata_result,
-                                "combined": combined
-                            }
-                            expert_statement = asyncio.run(generate_expert_summary(signals))
-                            combined["expert_statement"] = expert_statement
-                        except Exception as e:
-                            combined["expert_statement"] = f"Summary engine error: {str(e)}"
+                    expert_statement = "Expert summary unavailable: Gemini API quota exceeded or connection timed out."
+                
+                combined["expert_statement"] = expert_statement
     
                 processing_time = round(time.time() - start_time, 2)
     
